@@ -4,6 +4,11 @@ const QUESTION_TIME_LIMIT_SEC = 40;
 
 export { QUESTION_TIME_LIMIT_SEC };
 
+function isMissingSyncColumnsError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes('column') && m.includes('does not exist');
+}
+
 type PlayerRow = {
   id: string;
   correct_count: number;
@@ -15,9 +20,16 @@ type SessionRow = {
   id: string;
   pin: string;
   question_count: number;
-  current_question_index: number;
+  current_question_index?: number | null;
   status: string;
 };
+
+function sessionQuestionIndex(session: SessionRow): number {
+  const v = session.current_question_index;
+  if (v === undefined || v === null) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 function normalizeAnswer(a: string): string {
   return a.trim().replace(/\s+/g, '');
@@ -110,37 +122,56 @@ export async function advanceToNextQuestion(
     return { advanced: false, session: null, finished: false };
   }
 
-  const qIdx = session.current_question_index;
+  const qIdxSafe = sessionQuestionIndex(session);
 
   if (options.finalizeCurrent) {
-    await finalizeUnansweredForQuestion(supabase, session, qIdx);
+    await finalizeUnansweredForQuestion(supabase, session, qIdxSafe);
   }
 
-  const nextIdx = qIdx + 1;
+  const nextIdx = qIdxSafe + 1;
   const finished = nextIdx >= session.question_count;
+  const finishedAt = new Date().toISOString();
 
   if (finished) {
-    const { data: updated } = await supabase
+    let { data: updated, error } = await supabase
       .from('game_sessions')
       .update({
         current_question_index: session.question_count,
         status: 'finished',
-        finished_at: new Date().toISOString(),
+        finished_at: finishedAt,
       })
       .eq('id', session.id)
       .select()
       .single();
 
+    if (error && isMissingSyncColumnsError(error.message)) {
+      const leg = await supabase
+        .from('game_sessions')
+        .update({
+          status: 'finished',
+          finished_at: finishedAt,
+        })
+        .eq('id', session.id)
+        .select()
+        .single();
+      updated = leg.data;
+      error = leg.error;
+    }
+
+    if (error || !updated) {
+      return { advanced: false, session: null, finished: false };
+    }
+
     await supabase
       .from('players')
-      .update({ is_finished: true, finish_time: new Date().toISOString() })
+      .update({ is_finished: true, finish_time: finishedAt })
       .eq('session_id', session.id)
       .eq('is_finished', false);
 
     return { advanced: true, session: updated as SessionRow, finished: true };
   }
 
-  const { data: updated } = await supabase
+  const { data: updated, error } = await supabase
     .from('game_sessions')
     .update({
       current_question_index: nextIdx,
@@ -150,24 +181,31 @@ export async function advanceToNextQuestion(
     .select()
     .single();
 
+  if (error) {
+    if (isMissingSyncColumnsError(error.message)) {
+      return { advanced: false, session: null, finished: false };
+    }
+    return { advanced: false, session: null, finished: false };
+  }
+
   return { advanced: true, session: updated as SessionRow, finished: false };
 }
 
-/** 방금 제출 후, 현재 문항에 모든 참가자가 응답했으면 자동으로 다음 문anten으로 */
+/** 방금 제출 후, 현재 문항에 모든 참가자가 응답했으면 자동으로 다음 문항으로 */
 export async function maybeAutoAdvanceAfterAnswer(
   supabase: SupabaseClient,
   sessionId: string
 ): Promise<{ advanced: boolean }> {
   const { data: session } = await supabase
     .from('game_sessions')
-    .select('id, pin, question_count, current_question_index, status')
+    .select('*')
     .eq('id', sessionId)
     .single();
 
   if (!session || session.status !== 'playing') return { advanced: false };
 
   const s = session as SessionRow;
-  const qIdx = s.current_question_index;
+  const qIdxSafe = sessionQuestionIndex(s);
 
   const { count: playerCount } = await supabase
     .from('players')
@@ -178,7 +216,7 @@ export async function maybeAutoAdvanceAfterAnswer(
     .from('player_answers')
     .select('player_id')
     .eq('session_id', s.id)
-    .eq('question_index', qIdx);
+    .eq('question_index', qIdxSafe);
 
   const distinct = new Set((answers ?? []).map((r: { player_id: string }) => r.player_id));
   const n = playerCount ?? 0;

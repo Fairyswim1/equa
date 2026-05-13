@@ -23,13 +23,13 @@ export async function POST(
     total_questions: number;
   };
 
-  const { data: session } = await supabase
+  const { data: session, error: sessionFetchError } = await supabase
     .from('game_sessions')
-    .select('id, question_count, current_question_index, status')
+    .select('*')
     .eq('pin', pin)
     .single();
 
-  if (!session) {
+  if (sessionFetchError || !session) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
   }
 
@@ -37,12 +37,18 @@ export async function POST(
     return NextResponse.json({ error: 'Game is not active' }, { status: 400 });
   }
 
-  if (body.question_index !== session.current_question_index) {
+  const serverQ =
+    session.current_question_index === undefined || session.current_question_index === null
+      ? 0
+      : Number(session.current_question_index);
+  const serverIdx = Number.isFinite(serverQ) ? serverQ : 0;
+
+  if (body.question_index !== serverIdx) {
     return NextResponse.json(
       {
         error: 'stale_question',
         message: '이 문항은 이미 끝났습니다. 화면이 곧 갱신됩니다.',
-        current_question_index: session.current_question_index,
+        current_question_index: serverIdx,
       },
       { status: 409 }
     );

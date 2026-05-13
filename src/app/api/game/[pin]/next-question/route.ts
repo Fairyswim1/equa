@@ -10,11 +10,7 @@ export async function POST(
   const { pin } = await params;
   const supabase = createSupabaseForApi();
 
-  const { data: session, error } = await supabase
-    .from('game_sessions')
-    .select('id, pin, question_count, current_question_index, status')
-    .eq('pin', pin)
-    .single();
+  const { data: session, error } = await supabase.from('game_sessions').select('*').eq('pin', pin).single();
 
   if (error || !session) {
     return NextResponse.json({ error: 'Game not found' }, { status: 404 });
