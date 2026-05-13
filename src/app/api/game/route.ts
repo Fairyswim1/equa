@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { generatePin } from '@/lib/utils';
 import { getQuestions } from '@/lib/questions/bank';
 import { MapId } from '@/types/game';
-import { getSupabaseServerConfig, getSupabaseEnvDebug } from '@/lib/supabase/api';
+import { getSupabaseServerConfig, getSupabaseEnvDebug, vercelAnonKeyHint } from '@/lib/supabase/api';
 
 /** Vercel Edge가 아닌 Node에서 실행 (Supabase 클라이언트 안정성) */
 export const runtime = 'nodejs';
@@ -31,12 +31,14 @@ export async function GET() {
   const env = getSupabaseEnvDebug();
   const cfg = getSupabaseServerConfig();
   if (!cfg) {
+    const specific = vercelAnonKeyHint(env);
     return NextResponse.json(
       {
         ok: false,
         env,
         supabaseReachable: null,
         hint:
+          specific ??
           'Vercel에 변수는 있어도 이 배포에 안 들어온 경우가 많습니다. Deployments → 최신 배포 → ⋯ → Redeploy, 안 되면 "Redeploy without cache".',
         build: 'equa-api-v2',
       },
@@ -65,13 +67,16 @@ export async function POST(request: NextRequest) {
   try {
     const cfg = getSupabaseServerConfig();
     if (!cfg) {
+      const env = getSupabaseEnvDebug();
+      const specific = vercelAnonKeyHint(env);
       return NextResponse.json(
         {
           error:
-            'Supabase 환경 변수가 이 배포(서버)에 없습니다. Vercel → Settings → Environment Variables에서 URL·anon 키를 추가할 때 반드시 Production에도 체크하고, Save 후 Redeploy 하세요.',
-          env: getSupabaseEnvDebug(),
+            'Supabase 환경 변수가 이 배포(서버)에 없습니다. Vercel → Settings → Environment Variables에서 URL·anon 키를 확인하고 Save 후 Redeploy 하세요.',
+          env,
           hint:
-            '이름은 둘 중 한 세트면 됩니다: (1) NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY (2) SUPABASE_URL + SUPABASE_ANON_KEY — 값은 Supabase Project Settings → API와 동일하게. 학생/교사 화면 실시간 기능은 브라우저용이라 (1)도 꼭 넣는 것을 권장합니다.',
+            specific ??
+            '이름은 둘 중 한 세트면 됩니다: (1) NEXT_PUBLIC_* 두 개 (2) SUPABASE_URL + SUPABASE_ANON_KEY — 브라우저 실시간은 (1)도 필요합니다. anon 키만 서버에서 비면 SUPABASE_ANON_KEY 를 같은 값으로 추가하세요.',
           build: 'equa-api-v2',
         },
         { status: 503 }

@@ -2,6 +2,25 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export type SupabaseServerConfig = { url: string; key: string };
 
+export type SupabaseEnvDebug = {
+  hasSUPABASE_URL: boolean;
+  hasNEXT_PUBLIC_SUPABASE_URL: boolean;
+  hasSUPABASE_ANON_KEY: boolean;
+  hasNEXT_PUBLIC_SUPABASE_ANON_KEY: boolean;
+};
+
+/** Vercel+Next 빌드에서 NEXT_PUBLIC anon만 비는 패턴일 때 안내 문구 */
+export function vercelAnonKeyHint(env: SupabaseEnvDebug): string | null {
+  if (env.hasNEXT_PUBLIC_SUPABASE_URL && !env.hasNEXT_PUBLIC_SUPABASE_ANON_KEY && !env.hasSUPABASE_ANON_KEY) {
+    return [
+      '서버에서 anon 키만 비어 있습니다.',
+      'Vercel에 SUPABASE_ANON_KEY 를 추가하세요(Supabase anon public 키와 동일 값, 이름만 다름).',
+      'Production 체크 → Save → Redeploy.',
+    ].join(' ');
+  }
+  return null;
+}
+
 /**
  * 서버(API Route)에서 Supabase 접속 정보.
  * Vercel에서는 NEXT_PUBLIC_* 가 Production에 없으면 비어 있을 수 있어,
@@ -19,12 +38,7 @@ export function getSupabaseServerConfig(): SupabaseServerConfig | null {
 }
 
 /** Route Handler에서만 사용. 브라우저용이 아님. */
-export function getSupabaseEnvDebug(): {
-  hasSUPABASE_URL: boolean;
-  hasNEXT_PUBLIC_SUPABASE_URL: boolean;
-  hasSUPABASE_ANON_KEY: boolean;
-  hasNEXT_PUBLIC_SUPABASE_ANON_KEY: boolean;
-} {
+export function getSupabaseEnvDebug(): SupabaseEnvDebug {
   return {
     hasSUPABASE_URL: Boolean(process.env.SUPABASE_URL?.trim()),
     hasNEXT_PUBLIC_SUPABASE_URL: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()),
