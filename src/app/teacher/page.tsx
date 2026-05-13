@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -8,7 +8,8 @@ import { MapCard, MAP_CONFIGS } from '@/components/maps/MapBackground';
 import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
 import { CharacterSprite } from '@/components/characters/CharacterSprite';
 import { Player, GameSession, MapId, CharacterId } from '@/types/game';
-import { getRankEmoji } from '@/lib/utils';
+import { QUESTION_TIME_LIMIT_SEC } from '@/lib/game/sessionAdvance';
+import { getRankEmoji, cn } from '@/lib/utils';
 
 function TeacherPageInner() {
   const router = useRouter();
@@ -23,6 +24,9 @@ function TeacherPageInner() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [nextBusy, setNextBusy] = useState(false);
+  const [answeredCount, setAnsweredCount] = useState(0);
+  const [clock, setClock] = useState(0);
 
   const fetchSession = useCallback(async (pin: string) => {
     const res = await fetch(`/api/game/${pin}`);
@@ -70,6 +74,41 @@ function TeacherPageInner() {
     return () => { supabase.removeChannel(channel); };
   }, [session, fetchPlayers]);
 
+  useEffect(() => {
+    if (step !== 'playing' || !session) return;
+    const id = setInterval(() => setClock((c) => c + 1), 1000);
+    return () => clearInterval(id);
+  }, [step, session?.id]);
+
+  const teacherTimeLeft = useMemo(() => {
+    if (!session || step !== 'playing' || !session.question_started_at) return null;
+    void clock;
+    return Math.max(
+      0,
+      Math.ceil(
+        QUESTION_TIME_LIMIT_SEC -
+          (Date.now() - new Date(session.question_started_at).getTime()) / 1000
+      )
+    );
+  }, [session, step, session?.question_started_at, clock]);
+
+  useEffect(() => {
+    if (!session || step !== 'playing') return;
+    const supabase = createClient();
+    const load = async () => {
+      const qIdx = session.current_question_index ?? 0;
+      const { count } = await supabase
+        .from('player_answers')
+        .select('id', { count: 'exact', head: true })
+        .eq('session_id', session.id)
+        .eq('question_index', qIdx);
+      setAnsweredCount(count ?? 0);
+    };
+    void load();
+    const id = setInterval(load, 1500);
+    return () => clearInterval(id);
+  }, [session, step, session?.current_question_index, session?.id]);
+
   const handleCreateGame = async () => {
     if (!teacherName.trim()) { setError('이름을 입력해주세요.'); return; }
     setLoading(true);
@@ -111,6 +150,7 @@ function TeacherPageInner() {
     setLoading(true);
     try {
       await fetch(`/api/game/${session.pin}/start`, { method: 'POST' });
+      await fetchSession(session.pin);
       setStep('playing');
     } finally {
       setLoading(false);
@@ -123,11 +163,33 @@ function TeacherPageInner() {
     setStep('finished');
   };
 
+  const handleTeacherNextQuestion = async () => {
+    if (!session) return;
+    setNextBusy(true);
+    try {
+      const res = await fetch(`/api/game/${session.pin}/next-question`, { method: 'POST' });
+      const data = (await res.json()) as { session?: GameSession; finished?: boolean; error?: string };
+      if (!res.ok) {
+        setError(data.error ?? '다음 문제로 넘기지 못했습니다.');
+        return;
+      }
+      if (data.session) setSession(data.session);
+      if (data.finished) setStep('finished');
+    } finally {
+      setNextBusy(false);
+    }
+  };
+
   const maps: MapId[] = ['forest', 'ocean', 'space', 'sky', 'volcano'];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950">
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div
+        className={cn(
+          'mx-auto px-4 py-8',
+          step === 'playing' && session ? 'max-w-7xl' : 'max-w-5xl'
+        )}
+      >
 
         {/* Header */}
         <motion.div
@@ -300,22 +362,55 @@ function TeacherPageInner() {
           {/* STEP 3: 게임 진행 중 - 실시간 모니터링 */}
           {step === 'playing' && session && (
             <motion.div key="playing" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-bold text-white">
-                  실시간 경주 · {MAP_CONFIGS[session.map_type]?.name ?? session.map_type}
+                  실시간 경주 · {MAP_CONFIGS[session.map_type]?.name ?? session.map_type} · 문제{' '}
+                  {(session.current_question_index ?? 0) + 1}/{session.question_count}
                 </h2>
-                <button
-                  type="button"
-                  onClick={handleFinishGame}
-                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-600"
-                >
-                  게임 종료
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={nextBusy || players.length === 0}
+                    onClick={handleTeacherNextQuestion}
+                    className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-amber-950 transition-colors hover:bg-amber-300 disabled:opacity-50"
+                  >
+                    {nextBusy ? '처리 중…' : '다음 문제로 (미응답 자동 제출)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFinishGame}
+                    className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-600"
+                  >
+                    게임 종료
+                  </button>
+                </div>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="min-h-[300px] overflow-hidden rounded-2xl lg:min-h-[420px]">
-                  <ClimbRaceTrack mapId={session.map_type} players={players} compact className="h-full min-h-[300px] lg:min-h-[420px]" />
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white">
+                <p>
+                  <span className="font-bold text-amber-200">응답 완료</span>{' '}
+                  <span className="font-mono text-lg">
+                    {answeredCount}/{players.length || 0}
+                  </span>
+                  <span className="ml-2 text-white/60">(모두 응답 시 자동 진행)</span>
+                </p>
+                <p className="font-mono text-lg font-bold tabular-nums">
+                  남은 시간{' '}
+                  <span className="text-cyan-300">
+                    {teacherTimeLeft != null ? `${teacherTimeLeft}s` : `—/${QUESTION_TIME_LIMIT_SEC}s`}
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <div className="w-full min-h-[min(52vh,520px)] overflow-hidden rounded-2xl lg:min-h-[min(58vh,600px)]">
+                  <ClimbRaceTrack
+                    mapId={session.map_type}
+                    players={players}
+                    embedded
+                    timerSeconds={teacherTimeLeft ?? undefined}
+                    className="h-full w-full rounded-2xl"
+                  />
                 </div>
                 <div className="space-y-2 rounded-2xl border border-white/20 bg-white/5 p-4">
                   <p className="mb-2 text-sm font-bold text-purple-200">참가자 현황</p>

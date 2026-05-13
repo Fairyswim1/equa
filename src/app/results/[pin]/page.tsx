@@ -4,6 +4,7 @@ import { useState, useEffect, use } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { CharacterSprite } from '@/components/characters/CharacterSprite';
+import { MathText } from '@/components/MathText';
 import { Player, PlayerAnswer, CharacterId, Question } from '@/types/game';
 import * as XLSX from 'xlsx';
 
@@ -340,7 +341,9 @@ export default function ResultsPage({ params }: { params: Promise<{ pin: string 
                       <div className="px-4 pb-4 space-y-2">
                         {wrongQs.map(({ answer: a, question: q }) => (
                           <div key={a.id} className="bg-red-500/10 rounded-xl p-3 text-sm">
-                            <p className="text-white/80 mb-1">Q. {q.text}</p>
+                            <p className="text-white/80 mb-1">
+                              Q. <MathText as="span">{q.text}</MathText>
+                            </p>
                             <p className="text-red-300">제출: {a.answer_given || '(미제출)'}</p>
                             <p className="text-green-300">정답: {q.answer}</p>
                           </div>
@@ -372,7 +375,9 @@ export default function ResultsPage({ params }: { params: Promise<{ pin: string 
                       <div className="flex items-start gap-3">
                         <span className="text-purple-300 font-bold text-sm w-6">{idx + 1}</span>
                         <div className="flex-1">
-                          <p className="text-white text-sm mb-2">{q.text}</p>
+                          <p className="text-white text-sm mb-2">
+                            <MathText as="span">{q.text}</MathText>
+                          </p>
                           <div className="flex items-center gap-3 text-xs">
                             <span className={`px-2 py-0.5 rounded-full ${
                               q.category === 'complex' ? 'bg-purple-500/30 text-purple-300' :

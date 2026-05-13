@@ -21,7 +21,12 @@ export async function POST(
 
   const { data, error } = await supabase
     .from('game_sessions')
-    .update({ status: 'playing', started_at: new Date().toISOString() })
+    .update({
+      status: 'playing',
+      started_at: new Date().toISOString(),
+      current_question_index: 0,
+      question_started_at: new Date().toISOString(),
+    })
     .eq('pin', pin)
     .select()
     .single();

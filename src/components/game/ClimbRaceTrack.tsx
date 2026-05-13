@@ -275,6 +275,8 @@ export interface ClimbRaceTrackProps {
   className?: string;
   /** 프로필 말고 트랙만 (교사용 축소) */
   compact?: boolean;
+  /** 대시보드용: 화면 전체 높이 대신 큰 임베드 영역 */
+  embedded?: boolean;
 }
 
 function ClimbRaceTrackInner({
@@ -284,17 +286,23 @@ function ClimbRaceTrackInner({
   timerSeconds,
   className,
   compact,
+  embedded,
 }: ClimbRaceTrackProps) {
   const theme = THEMES[mapId] ?? THEMES.forest;
   const pathD = trackPathD(CLIMB_TRACK_POINTS);
   const stable = [...players].sort((a, b) => a.id.localeCompare(b.id));
+  const trailStones = [0.03, 0.09, 0.15, 0.21, 0.28, 0.35, 0.42, 0.49, 0.56, 0.63, 0.7, 0.77, 0.84, 0.91, 0.97];
 
   return (
     <div
       className={cn(
         'relative w-full overflow-hidden rounded-[28px] border shadow-2xl',
         'bg-slate-950',
-        compact ? 'min-h-[240px]' : 'min-h-[min(100vh,540px)] lg:min-h-screen lg:h-screen',
+        compact
+          ? 'min-h-[240px]'
+          : embedded
+            ? 'min-h-[min(52vh,520px)] h-[min(52vh,520px)] w-full max-h-[88vh] lg:min-h-[min(58vh,600px)] lg:h-[min(58vh,600px)]'
+            : 'min-h-[min(100vh,540px)] lg:min-h-screen lg:h-screen',
         className
       )}
       style={{
@@ -374,6 +382,44 @@ function ClimbRaceTrackInner({
         />
 
         <MapScenery mapId={mapId} theme={theme} />
+
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#1a0f08"
+          strokeWidth="11.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.55"
+        />
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#5c4a3a"
+          strokeWidth="9.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.42"
+        />
+
+        <g opacity="0.55">
+          {trailStones.map((t, i) => {
+            const pt = getPointOnPolyline(CLIMB_TRACK_POINTS, t);
+            const jitter = ((i * 17) % 5) * 0.08 - 0.16;
+            return (
+              <ellipse
+                key={i}
+                cx={pt.x + jitter * 0.35}
+                cy={pt.y + jitter * 0.22}
+                rx={0.35 + (i % 3) * 0.06}
+                ry={0.22 + (i % 2) * 0.05}
+                fill="#2d2418"
+                opacity={0.35 + (i % 4) * 0.06}
+                transform={`rotate(${i * 31 + 12} ${pt.x} ${pt.y})`}
+              />
+            );
+          })}
+        </g>
 
         <path
           d={pathD}

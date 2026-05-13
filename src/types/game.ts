@@ -11,6 +11,11 @@ export interface GameSession {
   status: GameStatus;
   created_at: string;
   teacher_name?: string;
+  /** DB 마이그레이션 002 이후: 전역 문항 인덱스(0~) */
+  current_question_index?: number;
+  question_started_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
 }
 
 export interface Player {

@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { CharacterCard, CharacterSprite } from '@/components/characters/CharacterSprite';
 import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
+import { MathText } from '@/components/MathText';
 import { GameSession, Player, Question, CharacterId } from '@/types/game';
+import { QUESTION_TIME_LIMIT_SEC } from '@/lib/game/sessionAdvance';
 import { getRankEmoji, cn } from '@/lib/utils';
 
 const CHARACTERS: CharacterId[] = ['fox', 'cat', 'rabbit', 'bear', 'penguin', 'dog'];
@@ -28,12 +30,14 @@ function StudentPageInner() {
   const [qIndex, setQIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [answerResult, setAnswerResult] = useState<'correct' | 'wrong' | null>(null);
-  const [timeLeft, setTimeLeft] = useState(20);
+  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT_SEC);
   const [questionStartTime, setQuestionStartTime] = useState(Date.now());
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [shortAnswer, setShortAnswer] = useState('');
   const [scoreGained, setScoreGained] = useState(0);
+  const submittingRef = useRef(false);
+  const lastSyncedQIdx = useRef(-1);
 
   // 게임 시작 감지
   const fetchPlayers = useCallback(async (sessionId: string, sessionPin: string) => {
@@ -74,17 +78,50 @@ function StudentPageInner() {
     return () => { supabase.removeChannel(channel); };
   }, [session, player, step, fetchPlayers]);
 
-  // 문제 타이머
+  // 서버와 동일한 문항 인덱스로 문제·입력 초기화
   useEffect(() => {
-    if (step !== 'playing' || answerResult !== null) return;
-    if (timeLeft <= 0) {
-      handleSubmitAnswer('');
+    if (step !== 'playing' || !session || questions.length === 0) return;
+    if (session.status === 'finished') {
+      setStep('finished');
       return;
     }
-    const t = setTimeout(() => setTimeLeft(t => t - 1), 1000);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, timeLeft, answerResult]);
+    const idx = Math.min(session.current_question_index ?? 0, questions.length - 1);
+    if (lastSyncedQIdx.current === idx) return;
+    lastSyncedQIdx.current = idx;
+    setQIndex(idx);
+    setCurrentQ(questions[idx]);
+    setSelectedAnswer(null);
+    setShortAnswer('');
+    setAnswerResult(null);
+    setScoreGained(0);
+    if (session.question_started_at) {
+      setQuestionStartTime(new Date(session.question_started_at).getTime());
+    } else {
+      setQuestionStartTime(Date.now());
+    }
+  }, [step, session, session?.current_question_index, session?.status, session?.question_started_at, questions]);
+
+  const handleSubmitRef = useRef<((explicitAnswer?: string) => Promise<void>) | null>(null);
+
+  // 40초 제한 — 서버 question_started_at 기준 (없으면 questionStartTime 폴백)
+  useEffect(() => {
+    if (step !== 'playing' || answerResult !== null || !session) return;
+
+    const tick = () => {
+      const start = session.question_started_at
+        ? new Date(session.question_started_at).getTime()
+        : questionStartTime;
+      const left = Math.ceil(QUESTION_TIME_LIMIT_SEC - (Date.now() - start) / 1000);
+      setTimeLeft(Math.max(0, left));
+      if (left <= 0 && !submittingRef.current) {
+        void handleSubmitRef.current?.('');
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [step, session, session?.question_started_at, session?.current_question_index, answerResult, questionStartTime]);
 
   // 문제 로드 (게임 시작 시)
   useEffect(() => {
@@ -105,37 +142,9 @@ function StudentPageInner() {
     if (data && data.length > 0) {
       const qs = data.map(d => JSON.parse(d.question_data) as Question);
       setQuestions(qs);
-      setCurrentQ(qs[0]);
-      setQIndex(0);
-      setTimeLeft(20);
-      setQuestionStartTime(Date.now());
+      lastSyncedQIdx.current = -1;
     }
   };
-
-  const nextQuestion = useCallback((currentIndex: number, qs: Question[]) => {
-    const nextIdx = currentIndex + 1;
-    if (nextIdx >= qs.length) {
-      setStep('finished');
-      return;
-    }
-    setQIndex(nextIdx);
-    setCurrentQ(qs[nextIdx]);
-    setSelectedAnswer(null);
-    setShortAnswer('');
-    setAnswerResult(null);
-    setTimeLeft(20);
-    setQuestionStartTime(Date.now());
-    setScoreGained(0);
-  }, []);
-
-  useEffect(() => {
-    if (answerResult !== null) {
-      const t = setTimeout(() => {
-        nextQuestion(qIndex, questions);
-      }, 1800);
-      return () => clearTimeout(t);
-    }
-  }, [answerResult, qIndex, questions, nextQuestion]);
 
   const handleJoin = async () => {
     if (!nickname.trim()) { setError('닉네임을 입력해주세요.'); return; }
@@ -184,30 +193,59 @@ function StudentPageInner() {
     }
   };
 
-  const handleSubmitAnswer = async (answer: string) => {
+  const handleSubmitAnswer = async (explicitAnswer?: string) => {
     if (!player || !currentQ || !session || answerResult !== null) return;
-    const timeTaken = (Date.now() - questionStartTime) / 1000;
-    const finalAnswer = answer !== undefined ? answer : (currentQ.type === 'short' ? shortAnswer : selectedAnswer ?? '');
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      const qIdxServer = session.current_question_index ?? qIndex;
+      const startMs = session.question_started_at
+        ? new Date(session.question_started_at).getTime()
+        : questionStartTime;
+      const timeTaken = Math.min(
+        QUESTION_TIME_LIMIT_SEC,
+        Math.max(0, (Date.now() - startMs) / 1000)
+      );
+      const finalAnswer =
+        explicitAnswer !== undefined
+          ? explicitAnswer
+          : currentQ.type === 'short'
+            ? shortAnswer
+            : selectedAnswer ?? '';
 
-    const res = await fetch(`/api/game/${session.pin}/answer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        player_id: player.id,
-        question_index: qIndex,
-        answer: finalAnswer,
-        time_taken: timeTaken,
-        correct_answer: currentQ.answer,
-        total_questions: session.question_count,
-      }),
-    });
+      const res = await fetch(`/api/game/${session.pin}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_id: player.id,
+          question_index: qIdxServer,
+          answer: finalAnswer,
+          time_taken: timeTaken,
+          correct_answer: currentQ.answer,
+          total_questions: session.question_count,
+        }),
+      });
 
-    const data = await res.json();
-    const isCorrect = data.is_correct;
-    setAnswerResult(isCorrect ? 'correct' : 'wrong');
-    if (data.player) setPlayer(data.player);
-    if (data.score_gained) setScoreGained(data.score_gained);
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 409) {
+        const sr = await fetch(`/api/game/${session.pin}`);
+        if (sr.ok) setSession(await sr.json());
+        return;
+      }
+
+      if (!res.ok) return;
+
+      const isCorrect = data.is_correct === true;
+      setAnswerResult(isCorrect ? 'correct' : 'wrong');
+      if (data.player) setPlayer(data.player);
+      if (typeof data.score_gained === 'number') setScoreGained(data.score_gained);
+    } finally {
+      submittingRef.current = false;
+    }
   };
+
+  handleSubmitRef.current = handleSubmitAnswer;
 
   const handleMultipleChoice = (option: string) => {
     if (answerResult !== null) return;
@@ -231,14 +269,14 @@ function StudentPageInner() {
           </div>
           <div className="relative z-30 order-2 flex min-h-0 flex-1 flex-col lg:order-1">
             <div className="flex items-center justify-center gap-2 bg-[#6B4BA8] py-3 text-center text-sm font-black text-white shadow-md">
-              <span>문제 {qIndex + 1} / {session.question_count}</span>
+              <span>문제 {(session.current_question_index ?? qIndex) + 1} / {session.question_count}</span>
               <span className="text-white/50">|</span>
               <span>{player.nickname}</span>
               <span className="text-amber-200">{player.score}점</span>
             </div>
             <div className="flex-1 overflow-y-auto bg-[#EDE7F6] p-3 sm:p-5">
               <motion.div
-                key={qIndex}
+                key={session.current_question_index ?? qIndex}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={cn(
@@ -269,7 +307,9 @@ function StudentPageInner() {
                   <span className="ml-auto text-amber-500">{'★'.repeat(currentQ.difficulty)}</span>
                 </div>
 
-                <p className="mb-4 text-base font-bold leading-relaxed text-slate-900">{currentQ.text}</p>
+                <MathText className="mb-4 block text-base font-bold leading-relaxed text-slate-900" as="div">
+                  {currentQ.text}
+                </MathText>
 
                 <AnimatePresence>
                   {answerResult && (
@@ -282,10 +322,25 @@ function StudentPageInner() {
                         answerResult === 'wrong' && 'bg-red-100 text-red-800'
                       )}
                     >
-                      {answerResult === 'correct' ? `정답! +${scoreGained}점` : `오답 — 정답: ${currentQ.answer}`}
+                      {answerResult === 'correct' ? (
+                        `정답! +${scoreGained}점`
+                      ) : (
+                        <span>
+                          오답 — 정답:{' '}
+                          <MathText as="span" className="inline font-black">
+                            {currentQ.answer}
+                          </MathText>
+                        </span>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {answerResult !== null && (
+                  <p className="mb-3 text-center text-xs font-semibold text-violet-800">
+                    다른 참가자의 응답을 기다리는 중이에요. 모두 완료되면 자동으로 다음 문제로 넘어갑니다.
+                  </p>
+                )}
 
                 {currentQ.type === 'multiple' && currentQ.options && (
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -309,7 +364,7 @@ function StudentPageInner() {
                         )}
                       >
                         <span className="mr-2 font-black text-violet-600">{['①', '②', '③', '④'][i]}</span>
-                        {opt}
+                        <MathText as="span">{opt}</MathText>
                       </motion.button>
                     ))}
                   </div>
@@ -319,10 +374,12 @@ function StudentPageInner() {
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <input
                       type="text"
-                      placeholder="답 입력"
+                      inputMode="numeric"
+                      pattern="-?[0-9]*"
+                      placeholder="정수만 입력"
                       value={shortAnswer}
-                      onChange={(e) => setShortAnswer(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && answerResult === null && handleSubmitAnswer(shortAnswer)}
+                      onChange={(e) => setShortAnswer(e.target.value.replace(/[^0-9-]/g, '').slice(0, 8))}
+                      onKeyDown={(e) => e.key === 'Enter' && answerResult === null && handleSubmitAnswer()}
                       disabled={answerResult !== null}
                       className="flex-1 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-center font-bold text-slate-900 focus:border-violet-500 focus:outline-none"
                     />
@@ -330,7 +387,7 @@ function StudentPageInner() {
                       type="button"
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => answerResult === null && handleSubmitAnswer(shortAnswer)}
+                      onClick={() => answerResult === null && handleSubmitAnswer()}
                       disabled={answerResult !== null || !shortAnswer.trim()}
                       className="rounded-xl bg-amber-400 px-8 py-3 font-black text-amber-950 shadow disabled:opacity-40"
                     >

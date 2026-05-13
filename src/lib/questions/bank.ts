@@ -1,4 +1,5 @@
 import { Question } from '@/types/game';
+import { texifyQuestionFields } from '@/lib/math/texify';
 
 export const QUESTION_BANK: Question[] = [
   // ========== 복소수 개념 ==========
@@ -177,9 +178,9 @@ export const QUESTION_BANK: Question[] = [
     type: 'short',
     category: 'complex',
     difficulty: 1,
-    text: '√(-4) 를 허수 단위 i를 사용하여 나타내면?',
-    answer: '2i',
-    explanation: '√(-4) = √4·√(-1) = 2i',
+    text: '√(-4)를 $i$를 사용하여 나타낼 때, $i$의 계수(정수)는?',
+    answer: '2',
+    explanation: '√(-4) = 2i 이므로 계수는 2',
   },
   {
     id: 'c019',
@@ -354,9 +355,9 @@ export const QUESTION_BANK: Question[] = [
     type: 'short',
     category: 'quadratic',
     difficulty: 1,
-    text: '2x²-7x+3=0의 두 근의 합은?',
-    answer: '7/2',
-    explanation: '(2x-1)(x-3)=0이므로 x=1/2 또는 x=3, 합=7/2',
+    text: '2x²-7x+3=0의 두 근 중 더 큰 정수 근은?',
+    answer: '3',
+    explanation: '(2x-1)(x-3)=0이므로 x=1/2 또는 x=3, 정수 근은 3',
   },
   {
     id: 'q015',
@@ -867,11 +868,21 @@ export const QUESTION_BANK: Question[] = [
 
 export function getQuestions(count: number): Question[] {
   const shuffled = [...QUESTION_BANK].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, QUESTION_BANK.length));
+  const picked = shuffled.slice(0, Math.min(count, QUESTION_BANK.length));
+  return picked.map((q) => {
+    const { text, options } = texifyQuestionFields(q.text, q.options);
+    const explanation = q.explanation ? texifyQuestionFields(q.explanation).text : undefined;
+    return { ...q, text, options, explanation, latex: true };
+  });
 }
 
 export function getQuestionsByCategory(category: string, count: number): Question[] {
   const filtered = QUESTION_BANK.filter(q => q.category === category);
   const shuffled = filtered.sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  const picked = shuffled.slice(0, count);
+  return picked.map((q) => {
+    const { text, options } = texifyQuestionFields(q.text, q.options);
+    const explanation = q.explanation ? texifyQuestionFields(q.explanation).text : undefined;
+    return { ...q, text, options, explanation, latex: true };
+  });
 }
