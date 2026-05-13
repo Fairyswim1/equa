@@ -146,10 +146,38 @@ function TeacherPageInner() {
 
   const handleStartGame = async () => {
     if (!session) return;
-    if (players.length < 1) { setError('최소 1명이 참여해야 합니다.'); return; }
+    if (players.length < 1) {
+      setError('최소 1명이 참여해야 합니다.');
+      return;
+    }
+    setError('');
     setLoading(true);
     try {
-      await fetch(`/api/game/${session.pin}/start`, { method: 'POST' });
+      const res = await fetch(`/api/game/${session.pin}/start`, { method: 'POST' });
+      let data: unknown = {};
+      try {
+        data = await res.json();
+      } catch {
+        /* empty body */
+      }
+      if (!res.ok) {
+        const d = data as {
+          error?: string;
+          hint?: string;
+          fullUpdateError?: string;
+        };
+        const parts = [
+          d.error,
+          d.hint,
+          d.fullUpdateError ? `첫 시도(DB 전체 갱신): ${d.fullUpdateError}` : undefined,
+        ].filter(Boolean);
+        setError(
+          parts.length > 0
+            ? parts.join('\n')
+            : `게임 시작에 실패했습니다. (HTTP ${res.status})`
+        );
+        return;
+      }
       await fetchSession(session.pin);
       setStep('playing');
     } finally {

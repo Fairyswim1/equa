@@ -63,8 +63,8 @@ function StudentPageInner() {
         (payload) => {
           const updated = payload.new as GameSession;
           setSession(updated);
-          if (updated.status === 'playing' && step === 'waiting') {
-            setStep('playing');
+          if (updated.status === 'playing') {
+            setStep((prev) => (prev === 'waiting' ? 'playing' : prev));
           }
           if (updated.status === 'finished') {
             setStep('finished');
@@ -76,7 +76,17 @@ function StudentPageInner() {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [session, player, step, fetchPlayers]);
+  }, [session, player, fetchPlayers]);
+
+  /** 대기실 진입 시·주기적으로 참가자 목록 갱신 (실시간만으로는 첫 로드가 비는 경우 방지) */
+  useEffect(() => {
+    if (step !== 'waiting' || !session || !player) return;
+    void fetchPlayers(session.id, session.pin);
+    const id = setInterval(() => {
+      void fetchPlayers(session.id, session.pin);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [step, session?.id, player?.id, session?.pin, fetchPlayers]);
 
   // 서버와 동일한 문항 인덱스로 문제·입력 초기화
   useEffect(() => {
