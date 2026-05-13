@@ -26,6 +26,40 @@ function supabaseHint(message: unknown): string {
   return raw || '알 수 없는 Supabase 오류';
 }
 
+/** 배포된 서버가 환경 변수·Supabase를 실제로 보는지 브라우저에서 확인용 */
+export async function GET() {
+  const env = getSupabaseEnvDebug();
+  const cfg = getSupabaseServerConfig();
+  if (!cfg) {
+    return NextResponse.json(
+      {
+        ok: false,
+        env,
+        supabaseReachable: null,
+        hint:
+          'Vercel에 변수는 있어도 이 배포에 안 들어온 경우가 많습니다. Deployments → 최신 배포 → ⋯ → Redeploy, 안 되면 "Redeploy without cache".',
+        build: 'equa-api-v2',
+      },
+      { status: 200 }
+    );
+  }
+  const supabase = createClient(cfg.url, cfg.key);
+  const { error } = await supabase.from('game_sessions').select('id').limit(1);
+  return NextResponse.json({
+    ok: error == null,
+    env,
+    supabaseReachable: error == null,
+    supabaseError: error?.message ?? null,
+    hint:
+      error?.message?.includes('does not exist')
+        ? '테이블 없음 → Supabase SQL Editor에서 001_initial_schema.sql 실행'
+        : error
+          ? 'DB 응답 오류 — supabaseError 참고'
+          : '서버·환경 변수·DB 연결 정상',
+    build: 'equa-api-v2',
+  });
+}
+
 // POST /api/game - 새 게임 세션 생성
 export async function POST(request: NextRequest) {
   try {
