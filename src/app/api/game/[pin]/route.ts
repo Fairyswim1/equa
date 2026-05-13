@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createSupabaseForApi } from '@/lib/supabase/api';
 
 // GET /api/game/[pin] - 게임 세션 정보 조회
 export async function GET(
@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
 
   const { data: session, error } = await supabase
     .from('game_sessions')
@@ -28,7 +28,7 @@ export async function PATCH(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
   const body = await request.json();
 
   const { data, error } = await supabase

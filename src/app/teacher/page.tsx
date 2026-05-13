@@ -79,8 +79,16 @@ function TeacherPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ map_type: mapType, question_count: questionCount, teacher_name: teacherName }),
       });
-      if (!res.ok) throw new Error('게임 생성 실패');
       const data = await res.json();
+      if (!res.ok) {
+        const main =
+          typeof data.error === 'string' && data.error ? data.error : `게임 생성 실패 (${res.status})`;
+        const extra =
+          typeof data.details === 'string' && data.details ? `\n(${data.details})` : '';
+        const build =
+          typeof data.build === 'string' && data.build ? `\n[빌드: ${data.build}]` : '';
+        throw new Error(main + extra + build);
+      }
       setSession(data.session);
       setStep('lobby');
     } catch (e) {

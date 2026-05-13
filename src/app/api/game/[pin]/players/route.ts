@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createSupabaseForApi } from '@/lib/supabase/api';
 import { CharacterId } from '@/types/game';
 
 // GET /api/game/[pin]/players - 플레이어 목록 조회
@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
 
   const { data: session } = await supabase
     .from('game_sessions')
@@ -39,7 +39,7 @@ export async function POST(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
   const body = await request.json() as { nickname: string; character: CharacterId };
 
   const { data: session } = await supabase

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createSupabaseForApi } from '@/lib/supabase/api';
 
 // POST /api/game/[pin]/finish - 게임 종료
 export async function POST(
@@ -7,7 +7,7 @@ export async function POST(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
 
   const { data, error } = await supabase
     .from('game_sessions')
@@ -29,7 +29,7 @@ export async function GET(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
 
   const { data: session } = await supabase
     .from('game_sessions')

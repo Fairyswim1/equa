@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createSupabaseForApi } from '@/lib/supabase/api';
 
 // POST /api/game/[pin]/answer - 답 제출
 export async function POST(
@@ -7,7 +7,7 @@ export async function POST(
   { params }: { params: Promise<{ pin: string }> }
 ) {
   const { pin } = await params;
-  const supabase = await createClient();
+  const supabase = createSupabaseForApi();
   const body = await request.json() as {
     player_id: string;
     question_index: number;
