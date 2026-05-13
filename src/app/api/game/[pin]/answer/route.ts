@@ -40,35 +40,36 @@ export async function POST(
   });
 
   // 플레이어 상태 업데이트
-  const { data: player } = await supabase
-    .from('players')
-    .select('correct_count, current_question_index')
-    .eq('id', body.player_id)
-    .single();
-
-  if (player) {
-    const newCorrectCount = is_correct ? player.correct_count + 1 : player.correct_count;
-    const newQuestionIndex = player.current_question_index + 1;
-    const totalQ = body.total_questions;
-    // 포지션: 정답 비율 + 속도 보너스
-    const speedBonus = is_correct ? Math.max(0, (15 - body.time_taken) / 15) * 3 : 0;
-    const position = Math.min(100, (newCorrectCount / totalQ) * 100 + speedBonus);
-    const isFinished = newQuestionIndex >= totalQ;
-    const scoreAdd = is_correct ? Math.max(10, Math.round(100 - body.time_taken * 5)) : 0;
-
-    const { data: updatedPlayer } = await supabase
+    const { data: player } = await supabase
       .from('players')
-      .update({
-        correct_count: newCorrectCount,
-        current_question_index: newQuestionIndex,
-        position,
-        score: (player as { score?: number }).score ?? 0 + scoreAdd,
-        is_finished: isFinished,
-        finish_time: isFinished ? new Date().toISOString() : null,
-      })
+      .select('correct_count, current_question_index, score')
       .eq('id', body.player_id)
-      .select()
       .single();
+
+    if (player) {
+      const currentScore = (player as { score: number }).score ?? 0;
+      const newCorrectCount = is_correct ? player.correct_count + 1 : player.correct_count;
+      const newQuestionIndex = player.current_question_index + 1;
+      const totalQ = body.total_questions;
+      // 포지션: 정답 비율 + 속도 보너스
+      const speedBonus = is_correct ? Math.max(0, (15 - body.time_taken) / 15) * 3 : 0;
+      const position = Math.min(100, (newCorrectCount / totalQ) * 100 + speedBonus);
+      const isFinished = newQuestionIndex >= totalQ;
+      const scoreAdd = is_correct ? Math.max(10, Math.round(100 - body.time_taken * 5)) : 0;
+
+      const { data: updatedPlayer } = await supabase
+        .from('players')
+        .update({
+          correct_count: newCorrectCount,
+          current_question_index: newQuestionIndex,
+          position,
+          score: currentScore + scoreAdd,
+          is_finished: isFinished,
+          finish_time: isFinished ? new Date().toISOString() : null,
+        })
+        .eq('id', body.player_id)
+        .select()
+        .single();
 
     return NextResponse.json({ is_correct, player: updatedPlayer, score_gained: scoreAdd });
   }
