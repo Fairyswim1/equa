@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { generatePin } from '@/lib/utils';
 import { getQuestions } from '@/lib/questions/bank';
 import { MapId } from '@/types/game';
+import { getSupabaseServerConfig, getSupabaseEnvDebug } from '@/lib/supabase/api';
 
 /** Vercel Edge가 아닌 Node에서 실행 (Supabase 클라이언트 안정성) */
 export const runtime = 'nodejs';
@@ -28,19 +29,22 @@ function supabaseHint(message: unknown): string {
 // POST /api/game - 새 게임 세션 생성
 export async function POST(request: NextRequest) {
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-    if (!url || !key) {
+    const cfg = getSupabaseServerConfig();
+    if (!cfg) {
       return NextResponse.json(
         {
           error:
-            'Supabase 환경 변수가 없습니다. NEXT_PUBLIC_SUPABASE_URL과 NEXT_PUBLIC_SUPABASE_ANON_KEY를 Vercel(Settings → Environment Variables)에 넣고 Redeploy 하세요.',
+            'Supabase 환경 변수가 이 배포(서버)에 없습니다. Vercel → Settings → Environment Variables에서 URL·anon 키를 추가할 때 반드시 Production에도 체크하고, Save 후 Redeploy 하세요.',
+          env: getSupabaseEnvDebug(),
+          hint:
+            '이름은 둘 중 한 세트면 됩니다: (1) NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY (2) SUPABASE_URL + SUPABASE_ANON_KEY — 값은 Supabase Project Settings → API와 동일하게. 학생/교사 화면 실시간 기능은 브라우저용이라 (1)도 꼭 넣는 것을 권장합니다.',
+          build: 'equa-api-v2',
         },
         { status: 503 }
       );
     }
 
-    const supabase = createClient(url, key);
+    const supabase = createClient(cfg.url, cfg.key);
 
     let body: { map_type?: MapId; question_count?: number; teacher_name?: string };
     try {

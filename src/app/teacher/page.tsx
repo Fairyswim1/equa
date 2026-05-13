@@ -87,7 +87,13 @@ function TeacherPageInner() {
           typeof data.details === 'string' && data.details ? `\n(${data.details})` : '';
         const build =
           typeof data.build === 'string' && data.build ? `\n[빌드: ${data.build}]` : '';
-        throw new Error(main + extra + build);
+        const envHint =
+          data.env && typeof data.env === 'object'
+            ? `\n(서버에 잡힌 변수: PUBLIC_URL=${Boolean((data.env as { hasNEXT_PUBLIC_SUPABASE_URL?: boolean }).hasNEXT_PUBLIC_SUPABASE_URL)}, PUBLIC_KEY=${Boolean((data.env as { hasNEXT_PUBLIC_SUPABASE_ANON_KEY?: boolean }).hasNEXT_PUBLIC_SUPABASE_ANON_KEY)}, SUPABASE_URL=${Boolean((data.env as { hasSUPABASE_URL?: boolean }).hasSUPABASE_URL)}, SUPABASE_ANON=${Boolean((data.env as { hasSUPABASE_ANON_KEY?: boolean }).hasSUPABASE_ANON_KEY)})`
+            : '';
+        const hint =
+          typeof data.hint === 'string' && data.hint ? `\n※ ${data.hint}` : '';
+        throw new Error(main + extra + build + envHint + hint);
       }
       setSession(data.session);
       setStep('lobby');
