@@ -85,11 +85,17 @@ function StudentPageInner() {
       setStep('finished');
       return;
     }
-    const idx = Math.min(session.current_question_index ?? 0, questions.length - 1);
-    if (lastSyncedQIdx.current === idx) return;
-    lastSyncedQIdx.current = idx;
-    setQIndex(idx);
-    setCurrentQ(questions[idx]);
+    const rawIdx = session.current_question_index;
+    const idx = Math.min(
+      rawIdx === undefined || rawIdx === null ? 0 : Number(rawIdx),
+      questions.length - 1
+    );
+    const idxSafe = Number.isFinite(idx) ? idx : 0;
+    // 같은 문항이어도 currentQ가 비어 있으면 반드시 채움 (effect 순서/Strict Mode 등)
+    if (lastSyncedQIdx.current === idxSafe && currentQ != null) return;
+    lastSyncedQIdx.current = idxSafe;
+    setQIndex(idxSafe);
+    setCurrentQ(questions[idxSafe]);
     setSelectedAnswer(null);
     setShortAnswer('');
     setAnswerResult(null);
@@ -99,7 +105,15 @@ function StudentPageInner() {
     } else {
       setQuestionStartTime(Date.now());
     }
-  }, [step, session, session?.current_question_index, session?.status, session?.question_started_at, questions]);
+  }, [
+    step,
+    session,
+    session?.current_question_index,
+    session?.status,
+    session?.question_started_at,
+    questions,
+    currentQ,
+  ]);
 
   const handleSubmitRef = useRef<((explicitAnswer?: string) => Promise<void>) | null>(null);
 
@@ -141,8 +155,25 @@ function StudentPageInner() {
       .order('question_index', { ascending: true });
     if (data && data.length > 0) {
       const qs = data.map(d => JSON.parse(d.question_data) as Question);
+      const rawIdx = session.current_question_index;
+      const idx = Math.min(
+        rawIdx === undefined || rawIdx === null ? 0 : Number(rawIdx),
+        qs.length - 1
+      );
+      const idxSafe = Number.isFinite(idx) ? idx : 0;
       setQuestions(qs);
-      lastSyncedQIdx.current = -1;
+      lastSyncedQIdx.current = idxSafe;
+      setQIndex(idxSafe);
+      setCurrentQ(qs[idxSafe]);
+      setSelectedAnswer(null);
+      setShortAnswer('');
+      setAnswerResult(null);
+      setScoreGained(0);
+      if (session.question_started_at) {
+        setQuestionStartTime(new Date(session.question_started_at).getTime());
+      } else {
+        setQuestionStartTime(Date.now());
+      }
     }
   };
 
