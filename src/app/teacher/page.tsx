@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { MapCard } from '@/components/maps/MapBackground';
+import { MapCard, MAP_CONFIGS } from '@/components/maps/MapBackground';
+import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
 import { CharacterSprite } from '@/components/characters/CharacterSprite';
 import { Player, GameSession, MapId, CharacterId } from '@/types/game';
 import { getRankEmoji } from '@/lib/utils';
@@ -299,56 +300,43 @@ function TeacherPageInner() {
           {/* STEP 3: 게임 진행 중 - 실시간 모니터링 */}
           {step === 'playing' && session && (
             <motion.div key="playing" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-              <div className="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/20 mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-white">🏃 실시간 레이스 현황</h2>
-                  <button
-                    onClick={handleFinishGame}
-                    className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-xl text-white text-sm font-bold transition-colors"
-                  >
-                    게임 종료
-                  </button>
-                </div>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-white">
+                  실시간 경주 · {MAP_CONFIGS[session.map_type]?.name ?? session.map_type}
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleFinishGame}
+                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-600"
+                >
+                  게임 종료
+                </button>
+              </div>
 
-                {/* 레이스 트랙 */}
-                <div className="space-y-3">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="min-h-[300px] overflow-hidden rounded-2xl lg:min-h-[420px]">
+                  <ClimbRaceTrack mapId={session.map_type} players={players} compact className="h-full min-h-[300px] lg:min-h-[420px]" />
+                </div>
+                <div className="space-y-2 rounded-2xl border border-white/20 bg-white/5 p-4">
+                  <p className="mb-2 text-sm font-bold text-purple-200">참가자 현황</p>
                   {[...players]
                     .sort((a, b) => b.position - a.position)
-                    .map((player, idx) => (
-                      <motion.div
-                        key={player.id}
-                        layout
-                        className="relative bg-white/5 rounded-xl p-3"
+                    .map((playerRow, idx) => (
+                      <div
+                        key={playerRow.id}
+                        className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2"
                       >
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-white font-bold w-6 text-center text-sm">{idx + 1}</span>
-                          <CharacterSprite character={player.character as CharacterId} size={32} running />
-                          <span className="text-white font-medium text-sm">{player.nickname}</span>
-                          <span className="ml-auto text-yellow-400 font-bold text-sm">{player.score}점</span>
-                          <span className="text-purple-300 text-xs">
-                            {player.current_question_index}/{session.question_count}문제
-                          </span>
-                          {player.is_finished && (
-                            <span className="text-green-400 text-xs font-bold">완주! ✓</span>
-                          )}
+                        <span className="w-6 text-center text-sm font-bold text-white/80">{idx + 1}</span>
+                        <CharacterSprite character={playerRow.character as CharacterId} size={36} running variant="mascot" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{playerRow.nickname}</p>
+                          <p className="text-[11px] text-purple-300">
+                            {playerRow.current_question_index}/{session.question_count}문항 · {Math.round(playerRow.position)}%
+                          </p>
                         </div>
-                        {/* 진행 바 */}
-                        <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
-                          <motion.div
-                            className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full"
-                            animate={{ width: `${player.position}%` }}
-                            transition={{ duration: 0.5 }}
-                          />
-                        </div>
-                        {/* 캐릭터 위치 표시 */}
-                        <motion.div
-                          className="absolute bottom-4"
-                          animate={{ left: `${Math.max(2, player.position - 3)}%` }}
-                          transition={{ duration: 0.5 }}
-                        >
-                          <CharacterSprite character={player.character as CharacterId} size={24} running />
-                        </motion.div>
-                      </motion.div>
+                        <span className="text-sm font-bold text-amber-300">{playerRow.score}점</span>
+                        {playerRow.is_finished && <span className="text-xs font-bold text-emerald-400">완주</span>}
+                      </div>
                     ))}
                 </div>
               </div>

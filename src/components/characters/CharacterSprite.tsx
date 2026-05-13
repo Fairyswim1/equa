@@ -9,6 +9,8 @@ interface CharacterSpriteProps {
   running?: boolean;
   className?: string;
   color?: string;
+  /** 트랙용: 테두리·배경 강조 (Nearpod 느낌) */
+  variant?: 'default' | 'mascot';
 }
 
 const CHARACTERS: Record<CharacterId, { name: string; emoji: string; color: string; accent: string }> = {
@@ -231,17 +233,30 @@ const CHARACTER_COMPONENTS: Record<CharacterId, React.FC<{ size: number; running
   dog: DogSVG,
 };
 
-export function CharacterSprite({ character, size = 64, running = false, className }: CharacterSpriteProps) {
+export function CharacterSprite({
+  character,
+  size = 64,
+  running = false,
+  className,
+  variant = 'default',
+}: CharacterSpriteProps) {
   const Component = CHARACTER_COMPONENTS[character];
   return (
     <div
-      className={cn('relative inline-block', running && 'animate-bounce', className)}
+      className={cn(
+        'relative inline-block',
+        running && variant === 'default' && 'animate-bounce',
+        running && variant === 'mascot' && 'motion-safe:animate-[bounce-subtle_0.45s_ease-in-out_infinite]',
+        variant === 'mascot' && 'rounded-full bg-gradient-to-b from-white/50 to-white/10 p-0.5 ring-[2.5px] ring-[#3d2917] shadow-[0_3px_0_#2d1f12]',
+        className
+      )}
       style={{ animationDuration: running ? '0.4s' : undefined }}
     >
       <style>{`
         @keyframes legFront { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
         @keyframes legBack { from { transform: rotate(20deg); } to { transform: rotate(-20deg); } }
         @keyframes wingFlap { from { transform: rotate(15deg); } to { transform: rotate(-10deg); } }
+        @keyframes bounce-subtle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
       `}</style>
       <Component size={size} running={running} />
     </div>

@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { CharacterCard, CharacterSprite } from '@/components/characters/CharacterSprite';
+import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
 import { GameSession, Player, Question, CharacterId } from '@/types/game';
-import { getRankEmoji } from '@/lib/utils';
+import { getRankEmoji, cn } from '@/lib/utils';
 
 const CHARACTERS: CharacterId[] = ['fox', 'cat', 'rabbit', 'bear', 'penguin', 'dog'];
 
@@ -216,6 +217,132 @@ function StudentPageInner() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-900 via-teal-800 to-cyan-900">
+      {/* Nearpod식: 와이드에서 퀴즈 | 맵 경주 */}
+      {step === 'playing' && currentQ && player && session ? (
+        <div className="flex min-h-screen flex-col lg:flex-row">
+          <div className="relative order-1 h-[min(38vh,280px)] w-full shrink-0 lg:order-2 lg:h-screen lg:min-h-0 lg:w-[min(440px,40vw)]">
+            <ClimbRaceTrack
+              mapId={session.map_type}
+              players={allPlayers.length ? allPlayers : [player]}
+              emphasizePlayerId={player.id}
+              timerSeconds={timeLeft}
+              className="h-full rounded-none border-0 shadow-none lg:rounded-l-none"
+            />
+          </div>
+          <div className="relative z-30 order-2 flex min-h-0 flex-1 flex-col lg:order-1">
+            <div className="flex items-center justify-center gap-2 bg-[#6B4BA8] py-3 text-center text-sm font-black text-white shadow-md">
+              <span>문제 {qIndex + 1} / {session.question_count}</span>
+              <span className="text-white/50">|</span>
+              <span>{player.nickname}</span>
+              <span className="text-amber-200">{player.score}점</span>
+            </div>
+            <div className="flex-1 overflow-y-auto bg-[#EDE7F6] p-3 sm:p-5">
+              <motion.div
+                key={qIndex}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={cn(
+                  'mx-auto max-w-xl rounded-2xl border-2 bg-white p-5 shadow-lg',
+                  answerResult === 'correct' && 'border-emerald-500 ring-2 ring-emerald-200',
+                  answerResult === 'wrong' && 'border-red-400 ring-2 ring-red-100',
+                  !answerResult && 'border-[#D1C4E9]'
+                )}
+              >
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[11px] font-bold',
+                      currentQ.category === 'complex' && 'bg-purple-100 text-purple-800',
+                      currentQ.category === 'quadratic' && 'bg-blue-100 text-blue-800',
+                      currentQ.category === 'concept' && 'bg-amber-100 text-amber-900'
+                    )}
+                  >
+                    {currentQ.category === 'complex'
+                      ? '복소수'
+                      : currentQ.category === 'quadratic'
+                        ? '이차방정식'
+                        : '개념'}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    {currentQ.type === 'multiple' ? '객관식' : '주관식'}
+                  </span>
+                  <span className="ml-auto text-amber-500">{'★'.repeat(currentQ.difficulty)}</span>
+                </div>
+
+                <p className="mb-4 text-base font-bold leading-relaxed text-slate-900">{currentQ.text}</p>
+
+                <AnimatePresence>
+                  {answerResult && (
+                    <motion.div
+                      initial={{ scale: 0.96, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className={cn(
+                        'mb-3 rounded-xl py-2.5 text-center text-base font-black',
+                        answerResult === 'correct' && 'bg-emerald-100 text-emerald-800',
+                        answerResult === 'wrong' && 'bg-red-100 text-red-800'
+                      )}
+                    >
+                      {answerResult === 'correct' ? `정답! +${scoreGained}점` : `오답 — 정답: ${currentQ.answer}`}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {currentQ.type === 'multiple' && currentQ.options && (
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    {currentQ.options.map((opt, i) => (
+                      <motion.button
+                        key={i}
+                        type="button"
+                        whileHover={answerResult === null ? { scale: 1.01 } : {}}
+                        whileTap={answerResult === null ? { scale: 0.99 } : {}}
+                        onClick={() => handleMultipleChoice(opt)}
+                        disabled={answerResult !== null}
+                        className={cn(
+                          'rounded-xl border-2 py-3.5 px-4 text-left text-sm font-semibold transition-colors',
+                          answerResult !== null && opt === currentQ.answer && 'border-emerald-500 bg-emerald-50 text-emerald-900',
+                          answerResult !== null &&
+                            opt === selectedAnswer &&
+                            opt !== currentQ.answer &&
+                            'border-red-400 bg-red-50 text-red-900',
+                          answerResult === null && selectedAnswer === opt && 'border-amber-400 bg-amber-50',
+                          answerResult === null && selectedAnswer !== opt && 'border-slate-200 bg-slate-50 hover:border-violet-300 hover:bg-violet-50/50'
+                        )}
+                      >
+                        <span className="mr-2 font-black text-violet-600">{['①', '②', '③', '④'][i]}</span>
+                        {opt}
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
+
+                {currentQ.type === 'short' && (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      placeholder="답 입력"
+                      value={shortAnswer}
+                      onChange={(e) => setShortAnswer(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && answerResult === null && handleSubmitAnswer(shortAnswer)}
+                      disabled={answerResult !== null}
+                      className="flex-1 rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-center font-bold text-slate-900 focus:border-violet-500 focus:outline-none"
+                    />
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => answerResult === null && handleSubmitAnswer(shortAnswer)}
+                      disabled={answerResult !== null || !shortAnswer.trim()}
+                      className="rounded-xl bg-amber-400 px-8 py-3 font-black text-amber-950 shadow disabled:opacity-40"
+                    >
+                      제출
+                    </motion.button>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="max-w-2xl mx-auto px-4 py-6">
         <AnimatePresence mode="wait">
 
@@ -327,149 +454,6 @@ function StudentPageInner() {
             </motion.div>
           )}
 
-          {/* PLAYING */}
-          {step === 'playing' && currentQ && player && session && (
-            <motion.div key="playing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              {/* 헤더 */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <CharacterSprite character={player.character as CharacterId} size={36} running={answerResult === null} />
-                  <div>
-                    <p className="text-white font-bold text-sm">{player.nickname}</p>
-                    <p className="text-teal-300 text-xs">{player.score}점</p>
-                  </div>
-                </div>
-                <div className="text-center">
-                  <p className="text-teal-300 text-xs">{qIndex + 1} / {session.question_count}</p>
-                  <div className="w-32 bg-white/10 rounded-full h-2 mt-1">
-                    <div
-                      className="h-full bg-yellow-400 rounded-full transition-all"
-                      style={{ width: `${((qIndex + 1) / session.question_count) * 100}%` }}
-                    />
-                  </div>
-                </div>
-                <div className={`w-14 h-14 rounded-full flex items-center justify-center font-black text-2xl border-4 ${
-                  timeLeft > 10 ? 'border-green-400 text-green-400' :
-                  timeLeft > 5 ? 'border-yellow-400 text-yellow-400' :
-                  'border-red-400 text-red-400 animate-pulse'
-                }`}>
-                  {timeLeft}
-                </div>
-              </div>
-
-              {/* 진행 바 */}
-              <div className="w-full bg-white/10 rounded-full h-3 mb-4">
-                <motion.div
-                  className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full"
-                  animate={{ width: `${player.position}%` }}
-                  transition={{ duration: 0.5 }}
-                />
-              </div>
-
-              {/* 문제 카드 */}
-              <motion.div
-                key={qIndex}
-                initial={{ x: 100, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                className={`bg-white/10 backdrop-blur rounded-2xl p-6 border-2 mb-4 ${
-                  answerResult === 'correct' ? 'border-green-400 bg-green-500/10' :
-                  answerResult === 'wrong' ? 'border-red-400 bg-red-500/10' :
-                  'border-white/20'
-                }`}
-              >
-                {/* 카테고리 배지 */}
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                    currentQ.category === 'complex' ? 'bg-purple-500/30 text-purple-300' :
-                    currentQ.category === 'quadratic' ? 'bg-blue-500/30 text-blue-300' :
-                    'bg-yellow-500/30 text-yellow-300'
-                  }`}>
-                    {currentQ.category === 'complex' ? '🔢 복소수' :
-                     currentQ.category === 'quadratic' ? '📐 이차방정식' : '💡 개념'}
-                  </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    currentQ.type === 'multiple' ? 'bg-indigo-500/30 text-indigo-300' : 'bg-teal-500/30 text-teal-300'
-                  }`}>
-                    {currentQ.type === 'multiple' ? '객관식' : '주관식'}
-                  </span>
-                  <span className="ml-auto text-yellow-400 text-xs">{'⭐'.repeat(currentQ.difficulty)}</span>
-                </div>
-
-                <p className="text-white font-bold text-lg mb-4 leading-relaxed">{currentQ.text}</p>
-
-                {/* 정답/오답 피드백 */}
-                <AnimatePresence>
-                  {answerResult && (
-                    <motion.div
-                      initial={{ scale: 0, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      className={`text-center py-3 rounded-xl mb-3 font-black text-xl ${
-                        answerResult === 'correct' ? 'bg-green-500/30 text-green-300' : 'bg-red-500/30 text-red-300'
-                      }`}
-                    >
-                      {answerResult === 'correct' ? (
-                        <>✅ 정답! +{scoreGained}점</>
-                      ) : (
-                        <>❌ 오답! 정답: {currentQ.answer}</>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* 객관식 */}
-                {currentQ.type === 'multiple' && currentQ.options && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {currentQ.options.map((opt, i) => (
-                      <motion.button
-                        key={i}
-                        whileHover={answerResult === null ? { scale: 1.02 } : {}}
-                        whileTap={answerResult === null ? { scale: 0.98 } : {}}
-                        onClick={() => handleMultipleChoice(opt)}
-                        disabled={answerResult !== null}
-                        className={`py-3 px-4 rounded-xl font-medium text-sm transition-all ${
-                          answerResult !== null && opt === currentQ.answer
-                            ? 'bg-green-500 text-white'
-                            : answerResult !== null && opt === selectedAnswer && opt !== currentQ.answer
-                            ? 'bg-red-500 text-white'
-                            : selectedAnswer === opt
-                            ? 'bg-yellow-400 text-yellow-900'
-                            : 'bg-white/10 text-white hover:bg-white/20'
-                        }`}
-                      >
-                        <span className="font-bold mr-2">{['①', '②', '③', '④'][i]}</span>
-                        {opt}
-                      </motion.button>
-                    ))}
-                  </div>
-                )}
-
-                {/* 주관식 */}
-                {currentQ.type === 'short' && (
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="답을 입력하세요"
-                      value={shortAnswer}
-                      onChange={(e) => setShortAnswer(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && answerResult === null && handleSubmitAnswer(shortAnswer)}
-                      disabled={answerResult !== null}
-                      className="flex-1 px-4 py-3 rounded-xl bg-white/20 text-white placeholder-teal-300 border border-white/30 focus:outline-none focus:border-yellow-400 text-center font-bold"
-                    />
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => answerResult === null && handleSubmitAnswer(shortAnswer)}
-                      disabled={answerResult !== null || !shortAnswer.trim()}
-                      className="px-6 py-3 bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 rounded-xl text-yellow-900 font-black"
-                    >
-                      제출
-                    </motion.button>
-                  </div>
-                )}
-              </motion.div>
-            </motion.div>
-          )}
-
           {/* FINISHED */}
           {(step === 'finished' || (player && player.is_finished)) && player && session && (
             <motion.div key="finished" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
@@ -511,6 +495,7 @@ function StudentPageInner() {
           )}
         </AnimatePresence>
       </div>
+      )}
     </div>
   );
 }
