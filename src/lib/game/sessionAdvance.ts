@@ -6,7 +6,13 @@ export { QUESTION_TIME_LIMIT_SEC };
 
 function isMissingSyncColumnsError(message: string): boolean {
   const m = message.toLowerCase();
-  return m.includes('column') && m.includes('does not exist');
+  return (
+    (m.includes('column') && (m.includes('does not exist') || m.includes('unknown'))) ||
+    m.includes('42703') ||
+    m.includes('undefined_column') ||
+    (m.includes('current_question_index') && m.includes('does not exist')) ||
+    (m.includes('question_started_at') && m.includes('does not exist'))
+  );
 }
 
 type PlayerRow = {
@@ -117,9 +123,15 @@ export async function advanceToNextQuestion(
   supabase: SupabaseClient,
   session: SessionRow,
   options: { finalizeCurrent: boolean }
-): Promise<{ advanced: boolean; session: SessionRow | null; finished: boolean }> {
+): Promise<{
+  advanced: boolean;
+  session: SessionRow | null;
+  finished: boolean;
+  lastError?: string;
+  hint?: string;
+}> {
   if (session.status !== 'playing') {
-    return { advanced: false, session: null, finished: false };
+    return { advanced: false, session: null, finished: false, lastError: 'not_playing' };
   }
 
   const qIdxSafe = sessionQuestionIndex(session);
@@ -129,14 +141,16 @@ export async function advanceToNextQuestion(
   }
 
   const nextIdx = qIdxSafe + 1;
-  const finished = nextIdx >= session.question_count;
+  const qc = Number(session.question_count);
+  const questionCount = Number.isFinite(qc) && qc > 0 ? qc : 10;
+  const finished = nextIdx >= questionCount;
   const finishedAt = new Date().toISOString();
 
   if (finished) {
     let { data: updated, error } = await supabase
       .from('game_sessions')
       .update({
-        current_question_index: session.question_count,
+        current_question_index: questionCount,
         status: 'finished',
         finished_at: finishedAt,
       })
@@ -159,7 +173,15 @@ export async function advanceToNextQuestion(
     }
 
     if (error || !updated) {
-      return { advanced: false, session: null, finished: false };
+      return {
+        advanced: false,
+        session: null,
+        finished: false,
+        lastError: error?.message,
+        hint: error?.message && isMissingSyncColumnsError(error.message)
+          ? 'Supabase에 supabase/migrations/002_session_question_sync.sql 적용 여부를 확인하세요.'
+          : undefined,
+      };
     }
 
     await supabase
@@ -171,24 +193,75 @@ export async function advanceToNextQuestion(
     return { advanced: true, session: updated as SessionRow, finished: true };
   }
 
-  const { data: updated, error } = await supabase
+  const now = new Date().toISOString();
+  let updated: SessionRow | null = null;
+  let lastErr: string | null = null;
+
+  const combined = await supabase
     .from('game_sessions')
     .update({
       current_question_index: nextIdx,
-      question_started_at: new Date().toISOString(),
+      question_started_at: now,
     })
     .eq('id', session.id)
     .select()
     .single();
 
-  if (error) {
-    if (isMissingSyncColumnsError(error.message)) {
-      return { advanced: false, session: null, finished: false };
+  if (!combined.error && combined.data) {
+    updated = combined.data as SessionRow;
+  } else {
+    lastErr = combined.error?.message ?? null;
+
+    const idxOnly = await supabase
+      .from('game_sessions')
+      .update({ current_question_index: nextIdx })
+      .eq('id', session.id)
+      .select()
+      .single();
+
+    if (!idxOnly.error && idxOnly.data) {
+      const timeOnly = await supabase
+        .from('game_sessions')
+        .update({ question_started_at: now })
+        .eq('id', session.id)
+        .select()
+        .single();
+
+      if (!timeOnly.error && timeOnly.data) {
+        updated = timeOnly.data as SessionRow;
+      } else {
+        const { data: refetched } = await supabase
+          .from('game_sessions')
+          .select('*')
+          .eq('id', session.id)
+          .single();
+        updated = {
+          ...(refetched ?? idxOnly.data),
+          current_question_index: nextIdx,
+          question_started_at: now,
+        } as SessionRow;
+      }
+      lastErr = null;
+    } else {
+      lastErr = idxOnly.error?.message ?? lastErr;
     }
-    return { advanced: false, session: null, finished: false };
   }
 
-  return { advanced: true, session: updated as SessionRow, finished: false };
+  if (!updated) {
+    const migrationHint =
+      lastErr && isMissingSyncColumnsError(lastErr)
+        ? 'Supabase에 supabase/migrations/002_session_question_sync.sql 을 적용했는지 확인하세요.'
+        : undefined;
+    return {
+      advanced: false,
+      session: null,
+      finished: false,
+      lastError: lastErr ?? undefined,
+      hint: migrationHint,
+    };
+  }
+
+  return { advanced: true, session: updated, finished: false };
 }
 
 /** 방금 제출 후, 현재 문항에 모든 참가자가 응답했으면 자동으로 다음 문항으로 */

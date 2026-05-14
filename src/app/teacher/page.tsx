@@ -196,9 +196,16 @@ function TeacherPageInner() {
     setNextBusy(true);
     try {
       const res = await fetch(`/api/game/${session.pin}/next-question`, { method: 'POST' });
-      const data = (await res.json()) as { session?: GameSession; finished?: boolean; error?: string };
+      const data = (await res.json()) as {
+        session?: GameSession;
+        finished?: boolean;
+        error?: string;
+        detail?: string;
+        hint?: string;
+      };
       if (!res.ok) {
-        setError(data.error ?? '다음 문제로 넘기지 못했습니다.');
+        const parts = [data.error, data.detail, data.hint].filter(Boolean);
+        setError(parts.join('\n') || '다음 문제로 넘기지 못했습니다.');
         return;
       }
       if (data.session) setSession(data.session);

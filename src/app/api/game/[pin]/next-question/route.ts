@@ -23,7 +23,14 @@ export async function POST(
   const result = await advanceToNextQuestion(supabase, session, { finalizeCurrent: true });
 
   if (!result.advanced || !result.session) {
-    return NextResponse.json({ error: '진행할 수 없습니다.' }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: '진행할 수 없습니다.',
+        detail: result.lastError,
+        hint: result.hint,
+      },
+      { status: 400 }
+    );
   }
 
   return NextResponse.json({ session: result.session, finished: result.finished });
