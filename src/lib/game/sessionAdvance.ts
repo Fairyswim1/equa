@@ -17,19 +17,13 @@ function isMissingSyncColumnsError(message: string): boolean {
   );
 }
 
-type PlayerRow = {
-  id: string;
-  correct_count: number;
-  current_question_index: number;
-  score: number;
-};
-
 type SessionRow = {
   id: string;
   pin: string;
   question_count: number;
   current_question_index?: number | null;
   status: string;
+  finished_at?: string | null;
 };
 
 function sessionQuestionIndex(session: SessionRow): number {
@@ -62,26 +56,85 @@ function speedBonus(isCorrect: boolean, timeTaken: number): number {
   return Math.max(0, (QUESTION_TIME_LIMIT_SEC - timeTaken) / QUESTION_TIME_LIMIT_SEC) * 3;
 }
 
-function positionFromStats(correctCount: number, totalQ: number, timeTaken: number, isCorrect: boolean): number {
-  const bonus = speedBonus(isCorrect, timeTaken);
-  return Math.min(100, (correctCount / totalQ) * 100 + bonus);
-}
-
 function scoreAdd(isCorrect: boolean, timeTaken: number): number {
   if (!isCorrect) return 0;
   return Math.max(10, Math.round(100 - timeTaken * 5));
 }
 
-/** 현재 문항에 아직 제출하지 않은 학생에게 오답 처리 + 플레이어 갱신 */
+/** 답안 제출 직후 UI용(실제 플레이어 점수는 라운드 종료 시 sync 에서 반영) */
+export function rewardPointsPreview(isCorrect: boolean, timeTaken: number): number {
+  return scoreAdd(isCorrect, timeTaken);
+}
+
+/** player_answers 기준으로 점수·위치 등 일괄 동기화(라운드 종료 후에 호출하면 전원 반응 전까지 레이스가 안 움직임) */
+export async function syncAllPlayersRaceStatsFromAnswers(
+  supabase: SupabaseClient,
+  session: SessionRow
+): Promise<void> {
+  const totalQRaw = Number(session.question_count);
+  const totalQ = Number.isFinite(totalQRaw) && totalQRaw > 0 ? totalQRaw : 10;
+
+  const { data: players } = await supabase.from('players').select('id').eq('session_id', session.id);
+  if (!players?.length) return;
+
+  const { data: ansAll } = await supabase
+    .from('player_answers')
+    .select('player_id, question_index, is_correct, time_taken')
+    .eq('session_id', session.id);
+
+  const list = ansAll ?? [];
+  const sessFinished = session.status === 'finished';
+
+  for (const pl of players as { id: string }[]) {
+    const rows = list
+      .filter((a: { player_id: string }) => a.player_id === pl.id)
+      .sort((a: { question_index: number }, b: { question_index: number }) => a.question_index - b.question_index);
+
+    let correctCount = 0;
+    let score = 0;
+    let position = 0;
+
+    for (const ans of rows) {
+      const tt = Number(ans.time_taken);
+      const ok = Boolean(ans.is_correct);
+      if (ok) {
+        correctCount++;
+        score += scoreAdd(true, tt);
+        position = Math.min(100, (correctCount / totalQ) * 100 + speedBonus(true, tt));
+      } else {
+        position = Math.min(100, (correctCount / totalQ) * 100);
+      }
+    }
+
+    const answeredDistinct = new Set(rows.map((r: { question_index: number }) => r.question_index)).size;
+    const current_question_index = answeredDistinct;
+    const is_finished = sessFinished ? true : current_question_index >= totalQ;
+
+    await supabase
+      .from('players')
+      .update({
+        correct_count: correctCount,
+        score,
+        position,
+        current_question_index,
+        is_finished,
+        finish_time: is_finished
+          ? sessFinished
+            ? (session.finished_at ?? new Date().toISOString())
+            : new Date().toISOString()
+          : null,
+      })
+      .eq('id', pl.id);
+  }
+}
+
+/** 현재 문항에 아직 제출하지 않은 학생에게 오답 처리 (플레이어 행은 sync에서 갱신) */
 export async function finalizeUnansweredForQuestion(
   supabase: SupabaseClient,
   session: SessionRow,
   questionIndex: number
 ): Promise<void> {
-  const { data: players } = await supabase
-    .from('players')
-    .select('id, correct_count, current_question_index, score')
-    .eq('session_id', session.id);
+  const { data: players } = await supabase.from('players').select('id').eq('session_id', session.id);
 
   if (!players?.length) return;
 
@@ -92,7 +145,7 @@ export async function finalizeUnansweredForQuestion(
     .eq('question_index', questionIndex);
 
   const answered = new Set((existing ?? []).map((r: { player_id: string }) => r.player_id));
-  for (const p of players as PlayerRow[]) {
+  for (const p of players as { id: string }[]) {
     if (answered.has(p.id)) continue;
 
     await supabase.from('player_answers').insert({
@@ -103,20 +156,6 @@ export async function finalizeUnansweredForQuestion(
       time_taken: QUESTION_TIME_LIMIT_SEC,
       answer_given: '',
     });
-
-    const newQuestionIndex = p.current_question_index + 1;
-    const pos = positionFromStats(p.correct_count, session.question_count, QUESTION_TIME_LIMIT_SEC, false);
-
-    await supabase
-      .from('players')
-      .update({
-        current_question_index: newQuestionIndex,
-        position: pos,
-        is_finished: newQuestionIndex >= session.question_count,
-        finish_time:
-          newQuestionIndex >= session.question_count ? new Date().toISOString() : null,
-      })
-      .eq('id', p.id);
   }
 }
 
@@ -181,6 +220,7 @@ export async function advanceToNextQuestion(
         .eq('id', session.id)
         .maybeSingle();
       if (row && (row as { status: string }).status === 'finished') {
+        await syncAllPlayersRaceStatsFromAnswers(supabase, row as SessionRow);
         return { advanced: true, session: row as SessionRow, finished: true };
       }
       return {
@@ -194,11 +234,7 @@ export async function advanceToNextQuestion(
       };
     }
 
-    await supabase
-      .from('players')
-      .update({ is_finished: true, finish_time: finishedAt })
-      .eq('session_id', session.id)
-      .eq('is_finished', false);
+    await syncAllPlayersRaceStatsFromAnswers(supabase, updated as SessionRow);
 
     return { advanced: true, session: updated as SessionRow, finished: true };
   }
@@ -267,9 +303,11 @@ export async function advanceToNextQuestion(
     if (row) {
       const r = row as SessionRow & { status: string };
       if (r.status === 'finished') {
+        await syncAllPlayersRaceStatsFromAnswers(supabase, r as SessionRow);
         return { advanced: true, session: r as SessionRow, finished: true };
       }
       if (r.status === 'playing' && sessionQuestionIndex(r) >= nextIdx) {
+        await syncAllPlayersRaceStatsFromAnswers(supabase, r as SessionRow);
         return { advanced: true, session: r as SessionRow, finished: false };
       }
     }
@@ -286,6 +324,13 @@ export async function advanceToNextQuestion(
       hint: migrationHint,
     };
   }
+
+  const { data: freshSession } = await supabase
+    .from('game_sessions')
+    .select('*')
+    .eq('id', session.id)
+    .single();
+  if (freshSession) await syncAllPlayersRaceStatsFromAnswers(supabase, freshSession as SessionRow);
 
   return { advanced: true, session: updated, finished: false };
 }
@@ -306,7 +351,6 @@ export async function maybeAutoAdvanceAfterAnswer(
   const s = session as SessionRow;
   const qIdxSafe = sessionQuestionIndex(s);
 
-  // count + head 조합에서 count가 안 오면 n=0 으로 잘못 막히는 경우가 있어 id 행으로 인원 확인
   const { data: playerRows } = await supabase
     .from('players')
     .select('id')

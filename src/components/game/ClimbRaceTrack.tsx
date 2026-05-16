@@ -292,6 +292,7 @@ function ClimbRaceTrackInner({
   const pathD = trackPathD(CLIMB_TRACK_POINTS);
   const stable = [...players].sort((a, b) => a.id.localeCompare(b.id));
   const trailStones = [0.03, 0.09, 0.15, 0.21, 0.28, 0.35, 0.42, 0.49, 0.56, 0.63, 0.7, 0.77, 0.84, 0.91, 0.97];
+  const checkpointT = [0, 0.2, 0.4, 0.62, 0.82, 1];
 
   return (
     <div
@@ -473,6 +474,33 @@ function ClimbRaceTrackInner({
           opacity="0.18"
         />
 
+        <g filter={`url(#trailShadow-${mapId})`} opacity="0.95">
+          {checkpointT.map((t, idx) => {
+            const pt = getPointOnPolyline(CLIMB_TRACK_POINTS, t);
+            const next = getPointOnPolyline(CLIMB_TRACK_POINTS, Math.min(1, t + 0.02));
+            const ang =
+              pt.x !== next.x ? (Math.atan2(next.y - pt.y, next.x - pt.x) * 180) / Math.PI - 90 : 0;
+            const doneTint = '#22C55E';
+            const lockTint = '#94A3B8';
+            return (
+              <g key={idx} transform={`translate(${pt.x}, ${pt.y}) rotate(${ang})`}>
+                <line x1="0" y1="6" x2="0" y2="-10" stroke="#1f2937" strokeWidth="0.45" opacity="0.55" />
+                <path
+                  d="M -2.8 -14 L -2.8 -22 L 3.8 -21 L 6.2 -19 L 8.4 -21 L 8 -14 Z"
+                  fill={idx <= 3 ? theme.trailGlow : idx === checkpointT.length - 1 ? theme.accent : lockTint}
+                  stroke="#0f172a"
+                  strokeWidth="0.35"
+                  opacity={0.9}
+                />
+                <ellipse cx="-1.2" cy="-12" rx="0.9" ry="2.2" fill={theme.accent} opacity="0.35" />
+                {idx === checkpointT.length - 1 ? (
+                  <circle cx="-0.5" cy="-29" r="1.9" fill={doneTint} stroke="#14532d" strokeWidth="0.25" />
+                ) : null}
+              </g>
+            );
+          })}
+        </g>
+
         <g transform="translate(72, 6)">
           <motion.g
             initial={false}
@@ -577,7 +605,7 @@ function ClimbRaceTrackInner({
               boxShadow: `0 0 14px ${theme.accent}`,
             }}
           />
-          정답을 맞힐수록 캐릭터가 정상에 더 빠르게 도착해요
+          모두 제출해야 이번 문제에서의 등반 순위와 위치가 한꺼번에 업데이트돼요
         </div>
       </div>
     </div>

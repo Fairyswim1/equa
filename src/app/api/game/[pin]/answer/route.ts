@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseForApi } from '@/lib/supabase/api';
-import {
-  answersEqual,
-  maybeAutoAdvanceAfterAnswer,
-  QUESTION_TIME_LIMIT_SEC,
-} from '@/lib/game/sessionAdvance';
+import { answersEqual, maybeAutoAdvanceAfterAnswer, rewardPointsPreview } from '@/lib/game/sessionAdvance';
 import type { Question } from '@/types/game';
 
 export const runtime = 'nodejs';
 
-// POST /api/game/[pin]/answer - 답 제출 (세션 문항 인덱스와 일치할 때만 허용)
+// POST /api/game/[pin]/answer - 답 제출 (세션 문항 인덱스와 일치할 때만 허용). 플레이어 행은 라운드 종료 시 동기화.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ pin: string }> }
@@ -63,16 +59,7 @@ export async function POST(
     .eq('question_index', body.question_index)
     .maybeSingle();
 
-  if (existingAns) {
-    const { data: player } = await supabase.from('players').select('*').eq('id', body.player_id).single();
-    return NextResponse.json({
-      is_correct: existingAns.is_correct,
-      player,
-      score_gained: 0,
-      duplicate: true,
-    });
-  }
-
+  let expectedAnswer = body.correct_answer;
   const { data: qRow } = await supabase
     .from('session_questions')
     .select('question_data')
@@ -81,8 +68,6 @@ export async function POST(
     .maybeSingle();
 
   let qType: Question['type'] = 'multiple';
-  /** 반드시 DB 기준으로 채점 (클라이언트 currentQ·correct_answer 불일치 시에도 오판 방지) */
-  let expectedAnswer = body.correct_answer;
   if (qRow?.question_data) {
     try {
       const q = JSON.parse(qRow.question_data as string) as Question;
@@ -95,7 +80,20 @@ export async function POST(
     }
   }
 
+  if (existingAns) {
+    const { data: player } = await supabase.from('players').select('*').eq('id', body.player_id).single();
+    return NextResponse.json({
+      is_correct: existingAns.is_correct,
+      official_answer: expectedAnswer,
+      my_answer: body.answer,
+      player,
+      score_gained: 0,
+      duplicate: true,
+    });
+  }
+
   const is_correct = answersEqual(body.answer, expectedAnswer, qType);
+  const score_gained_preview = rewardPointsPreview(is_correct, body.time_taken);
 
   await supabase.from('player_answers').insert({
     player_id: body.player_id,
@@ -106,53 +104,18 @@ export async function POST(
     answer_given: body.answer,
   });
 
-  const { data: player } = await supabase
-    .from('players')
-    .select('correct_count, current_question_index, score')
-    .eq('id', body.player_id)
-    .single();
-
-  if (!player) {
-    return NextResponse.json({ error: 'Player not found' }, { status: 404 });
-  }
-
-  const totalQ = body.total_questions;
-  const currentScore = (player as { score: number }).score ?? 0;
-  const newCorrectCount = is_correct ? player.correct_count + 1 : player.correct_count;
-  const newQuestionIndex = player.current_question_index + 1;
-  const speedBonus = is_correct
-    ? Math.max(0, (QUESTION_TIME_LIMIT_SEC - body.time_taken) / QUESTION_TIME_LIMIT_SEC) * 3
-    : 0;
-  const position = Math.min(100, (newCorrectCount / totalQ) * 100 + speedBonus);
-  const isFinished = newQuestionIndex >= totalQ;
-  const scoreAdd = scoreFromAnswer(is_correct, body.time_taken);
-
-  const { data: updatedPlayer } = await supabase
-    .from('players')
-    .update({
-      correct_count: newCorrectCount,
-      current_question_index: newQuestionIndex,
-      position,
-      score: currentScore + scoreAdd,
-      is_finished: isFinished,
-      finish_time: isFinished ? new Date().toISOString() : null,
-    })
-    .eq('id', body.player_id)
-    .select()
-    .single();
-
   const advanceResult = await maybeAutoAdvanceAfterAnswer(supabase, session.id);
+
+  const { data: playerFresh } = await supabase.from('players').select('*').eq('id', body.player_id).single();
 
   return NextResponse.json({
     is_correct,
-    player: updatedPlayer,
-    score_gained: scoreAdd,
+    official_answer: expectedAnswer,
+    my_answer: body.answer,
+    player: playerFresh,
+    /** 채점액(라운드가 끝나 sync 된 뒤 점수/위치에 반영) */
+    score_gained: score_gained_preview,
     session_advanced: advanceResult.advanced,
     ...(advanceResult.session ? { session: advanceResult.session } : {}),
   });
-}
-
-function scoreFromAnswer(isCorrect: boolean, timeTaken: number): number {
-  if (!isCorrect) return 0;
-  return Math.max(10, Math.round(100 - timeTaken * 5));
 }

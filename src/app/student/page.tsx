@@ -44,6 +44,12 @@ function StudentPageInner() {
   const [loading, setLoading] = useState(false);
   const [shortAnswer, setShortAnswer] = useState('');
   const [scoreGained, setScoreGained] = useState(0);
+  /** 채점 직후 문자열 피드백(API official_answer 포함) */
+  const [feedbackDetail, setFeedbackDetail] = useState<{
+    myAnswer: string;
+    officialAnswer: string;
+    scorePreview: number;
+  } | null>(null);
   const submittingRef = useRef(false);
   /** 같은 문항+시작시각 재적용 방지, question_started_at만 바뀌면 다시 적용 */
   const lastAppliedSessionSyncKeyRef = useRef('');
@@ -154,6 +160,7 @@ function StudentPageInner() {
     setSelectedAnswer(null);
     setShortAnswer('');
     setAnswerResult(null);
+    setFeedbackDetail(null);
     setScoreGained(0);
     if (session.question_started_at) {
       setQuestionStartTime(new Date(session.question_started_at).getTime());
@@ -345,10 +352,25 @@ function StudentPageInner() {
           if (sr.ok) setSession((await sr.json()) as GameSession);
         }
         setAnswerResult(null);
+        setFeedbackDetail(null);
+        void fetchPlayers(session.id, session.pin);
       } else {
         const isCorrect = data.is_correct === true;
         if (timerForcedEmptySubmit && !isCorrect) setAnswerResult('timeout');
         else setAnswerResult(isCorrect ? 'correct' : 'wrong');
+        const official =
+          typeof data.official_answer === 'string' && data.official_answer.trim() !== ''
+            ? (data.official_answer as string)
+            : currentQ.answer;
+        setFeedbackDetail({
+          myAnswer:
+            typeof data.my_answer === 'string'
+              ? (data.my_answer as string).trim()
+              : finalAnswer.trim(),
+          officialAnswer: official,
+          scorePreview:
+            typeof data.score_gained === 'number' ? (data.score_gained as number) : 0,
+        });
       }
       if (data.player) setPlayer(data.player);
       if (typeof data.score_gained === 'number') setScoreGained(data.score_gained);
@@ -429,31 +451,63 @@ function StudentPageInner() {
                       initial={{ scale: 0.96, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       className={cn(
-                        'mb-3 rounded-xl py-2.5 text-center text-base font-black',
-                        answerResult === 'correct' && 'bg-emerald-100 text-emerald-800',
-                        answerResult === 'wrong' && 'bg-red-100 text-red-800',
-                        answerResult === 'timeout' && 'bg-amber-100 text-amber-950'
+                        'mb-3 space-y-2 rounded-xl px-3 py-3 text-left',
+                        answerResult === 'correct' && 'bg-emerald-100 text-emerald-900 ring-2 ring-emerald-200',
+                        answerResult === 'wrong' && 'bg-red-50 text-red-950 ring-2 ring-red-200',
+                        answerResult === 'timeout' && 'bg-amber-100 text-amber-950 ring-2 ring-amber-200'
                       )}
                     >
-                      {answerResult === 'correct' ? (
-                        `정답! +${scoreGained}점`
-                      ) : answerResult === 'timeout' ? (
-                        <span>
-                          시간이 끝나 자동으로 제출됐어요. 답을 고르지 않으면 오답으로 처리돼요.{' '}
-                          <span className="text-amber-900/90">
-                            정답:{' '}
-                            <MathText as="span" className="inline font-black">
-                              {currentQ.answer}
+                      <div
+                        className={cn(
+                          'text-center text-base font-black',
+                          answerResult === 'correct' && 'text-emerald-900',
+                          answerResult === 'wrong' && 'text-red-900',
+                          answerResult === 'timeout' && 'text-amber-950'
+                        )}
+                      >
+                        {answerResult === 'correct'
+                          ? '정답이에요'
+                          : answerResult === 'timeout'
+                            ? '시간 초과 — 오답 처리'
+                            : '오답이에요'}
+                      </div>
+                      {(answerResult === 'wrong' ||
+                        answerResult === 'timeout') &&
+                        feedbackDetail && (
+                        <div className="rounded-lg border border-black/10 bg-white/75 px-2.5 py-2 text-sm">
+                          <div className="mb-1 flex flex-wrap items-baseline gap-1 font-bold text-slate-800">
+                            <span className="text-slate-600">내가 제출한 답</span>
+                            <MathText as="span" className="inline font-black text-violet-900">
+                              {answerResult === 'timeout' &&
+                              !(feedbackDetail.myAnswer && feedbackDetail.myAnswer.trim())
+                                ? '(미제출)'
+                                : feedbackDetail.myAnswer || '—'}
                             </MathText>
-                          </span>
-                        </span>
-                      ) : (
-                        <span>
-                          오답 — 정답:{' '}
-                          <MathText as="span" className="inline font-black">
-                            {currentQ.answer}
-                          </MathText>
-                        </span>
+                          </div>
+                          <div className="flex flex-wrap items-baseline gap-1 font-bold">
+                            <span className="text-emerald-800">모범 정답</span>
+                            <MathText as="span" className="inline font-black text-emerald-950">
+                              {feedbackDetail.officialAnswer}
+                            </MathText>
+                          </div>
+                        </div>
+                      )}
+                      {answerResult === 'correct' && (
+                        <>
+                          <p className="text-center text-[13px] font-bold leading-snug text-emerald-900">
+                            채점 획득 예정 보너스{' '}
+                            <span className="font-black">+{scoreGained}</span>
+                            점 (모두가 이 문제를 제출하면 점수·레이스에 반영돼요)
+                          </p>
+                          {(feedbackDetail?.myAnswer?.trim()?.length ?? 0) > 0 && feedbackDetail ? (
+                            <p className="text-center text-xs font-semibold text-emerald-800/95">
+                              제출 내용{' '}
+                              <MathText as="span" className="inline font-black">
+                                {feedbackDetail.myAnswer}
+                              </MathText>
+                            </p>
+                          ) : null}
+                        </>
                       )}
                     </motion.div>
                   )}
@@ -461,7 +515,8 @@ function StudentPageInner() {
 
                 {answerResult !== null && (
                   <p className="mb-3 text-center text-xs font-semibold text-violet-800">
-                    다른 참가자의 응답을 기다리는 중이에요. 모두 완료되면 자동으로 다음 문제로 넘어갑니다.
+                    이 문제에서는 정답을 맞춰도 캐릭터는 움직이지 않아요. 모두 제출해야 한 번에 레이스가
+                    업데이트되고 다음 문제로 넘어가요.
                   </p>
                 )}
 
