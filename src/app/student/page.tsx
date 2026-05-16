@@ -13,6 +13,14 @@ import { getRankEmoji, cn } from '@/lib/utils';
 
 const CHARACTERS: CharacterId[] = ['fox', 'cat', 'rabbit', 'bear', 'penguin', 'dog'];
 
+/** 서버 세션 인덱스(0~)를 문제 배열 길이 안으로 맞춤 */
+function clampSessionQuestionIndex(raw: unknown, questionCount: number): number {
+  if (questionCount <= 0) return 0;
+  const v = raw === undefined || raw === null ? 0 : Number(raw);
+  const idx = Number.isFinite(v) ? v : 0;
+  return Math.min(Math.max(0, idx), questionCount - 1);
+}
+
 function StudentPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -29,7 +37,7 @@ function StudentPageInner() {
   const [currentQ, setCurrentQ] = useState<Question | null>(null);
   const [qIndex, setQIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [answerResult, setAnswerResult] = useState<'correct' | 'wrong' | null>(null);
+  const [answerResult, setAnswerResult] = useState<'correct' | 'wrong' | 'timeout' | null>(null);
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT_SEC);
   const [questionStartTime, setQuestionStartTime] = useState(Date.now());
   const [error, setError] = useState('');
@@ -37,7 +45,12 @@ function StudentPageInner() {
   const [shortAnswer, setShortAnswer] = useState('');
   const [scoreGained, setScoreGained] = useState(0);
   const submittingRef = useRef(false);
-  const lastSyncedQIdx = useRef(-1);
+  /** 같은 문항+시작시각 재적용 방지, question_started_at만 바뀌면 다시 적용 */
+  const lastAppliedSessionSyncKeyRef = useRef('');
+  /** GET /pin 폴링 응답 순서 처리 */
+  const pollGenRef = useRef(0);
+  /** 문제 은행 fetch 완료 순서 처리 */
+  const questionsLoadGenRef = useRef(0);
 
   // 게임 시작 감지
   const fetchPlayers = useCallback(async (sessionId: string, sessionPin: string) => {
@@ -88,6 +101,42 @@ function StudentPageInner() {
     return () => clearInterval(id);
   }, [step, session?.id, player?.id, session?.pin, fetchPlayers]);
 
+  // GET으로 세션 권위 복구 (실시간 누락·지연 완화, 문항 불일치 방지)
+  useEffect(() => {
+    if (!session?.pin || (step !== 'waiting' && step !== 'playing')) return;
+
+    let cancelled = false;
+    const seqAtMount = ++pollGenRef.current;
+
+    const poll = async () => {
+      const seq = ++pollGenRef.current;
+      try {
+        const res = await fetch(`/api/game/${session.pin}`);
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as GameSession;
+        if (cancelled || seq !== pollGenRef.current) return;
+
+        setSession(body);
+        if (body.status === 'playing') {
+          setStep((prev) => (prev === 'waiting' ? 'playing' : prev));
+        }
+        if (body.status === 'finished') {
+          setStep('finished');
+        }
+      } catch {
+        /* 네트워크 일시 실패 무시 */
+      }
+    };
+
+    void poll();
+    const id = setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      pollGenRef.current = seqAtMount + 1;
+      clearInterval(id);
+    };
+  }, [step, session?.pin]);
+
   // 서버와 동일한 문항 인덱스로 문제·입력 초기화
   useEffect(() => {
     if (step !== 'playing' || !session || questions.length === 0) return;
@@ -95,15 +144,11 @@ function StudentPageInner() {
       setStep('finished');
       return;
     }
-    const rawIdx = session.current_question_index;
-    const idx = Math.min(
-      rawIdx === undefined || rawIdx === null ? 0 : Number(rawIdx),
-      questions.length - 1
-    );
-    const idxSafe = Number.isFinite(idx) ? idx : 0;
-    // 같은 문항이어도 currentQ가 비어 있으면 반드시 채움 (effect 순서/Strict Mode 등)
-    if (lastSyncedQIdx.current === idxSafe && currentQ != null) return;
-    lastSyncedQIdx.current = idxSafe;
+    const idxSafe = clampSessionQuestionIndex(session.current_question_index, questions.length);
+    const syncKey = `${session.id}|${idxSafe}|${session.question_started_at ?? ''}|${session.status}`;
+    if (lastAppliedSessionSyncKeyRef.current === syncKey && currentQ != null) return;
+
+    lastAppliedSessionSyncKeyRef.current = syncKey;
     setQIndex(idxSafe);
     setCurrentQ(questions[idxSafe]);
     setSelectedAnswer(null);
@@ -117,10 +162,10 @@ function StudentPageInner() {
     }
   }, [
     step,
-    session,
+    session?.id,
     session?.current_question_index,
-    session?.status,
     session?.question_started_at,
+    session?.status,
     questions,
     currentQ,
   ]);
@@ -147,45 +192,54 @@ function StudentPageInner() {
     return () => clearInterval(id);
   }, [step, session, session?.question_started_at, session?.current_question_index, answerResult, questionStartTime]);
 
-  // 문제 로드 (게임 시작 시)
+  // 문제 은행 로드 후, 현재 문항 인덱스는 항상 GET /api 게임 세션(권위)으로 맞춤 — 오래된 session 클로저로 다른 문제가 나오는 버그 방지
   useEffect(() => {
-    if (step === 'playing' && session && questions.length === 0) {
-      loadQuestions();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, session]);
+    if (step !== 'playing' || !session?.pin || !session.id) return;
+    if (questions.length > 0) return;
 
-  const loadQuestions = async () => {
-    if (!session) return;
-    const supabase = createClient();
-    const { data } = await supabase
-      .from('session_questions')
-      .select('question_data')
-      .eq('session_id', session.id)
-      .order('question_index', { ascending: true });
-    if (data && data.length > 0) {
-      const qs = data.map(d => JSON.parse(d.question_data) as Question);
-      const rawIdx = session.current_question_index;
-      const idx = Math.min(
-        rawIdx === undefined || rawIdx === null ? 0 : Number(rawIdx),
-        qs.length - 1
-      );
-      const idxSafe = Number.isFinite(idx) ? idx : 0;
+    let cancelled = false;
+    const loadSeq = ++questionsLoadGenRef.current;
+
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('session_questions')
+        .select('question_data')
+        .eq('session_id', session.id)
+        .order('question_index', { ascending: true });
+      if (cancelled || !data?.length) return;
+
+      const qs = data.map((d) => JSON.parse(d.question_data as string) as Question);
+      const res = await fetch(`/api/game/${session.pin}`);
+      if (cancelled || loadSeq !== questionsLoadGenRef.current) return;
+
+      const srv = (res.ok ? await res.json() : session) as GameSession;
+
+      if (srv.status === 'finished') setStep('finished');
+
+      const idxSafe = clampSessionQuestionIndex(srv.current_question_index, qs.length);
+      const syncKey = `${srv.id}|${idxSafe}|${srv.question_started_at ?? ''}|${srv.status}`;
+      lastAppliedSessionSyncKeyRef.current = syncKey;
+      setSession(srv);
       setQuestions(qs);
-      lastSyncedQIdx.current = idxSafe;
       setQIndex(idxSafe);
       setCurrentQ(qs[idxSafe]);
       setSelectedAnswer(null);
       setShortAnswer('');
       setAnswerResult(null);
       setScoreGained(0);
-      if (session.question_started_at) {
-        setQuestionStartTime(new Date(session.question_started_at).getTime());
+      if (srv.question_started_at) {
+        setQuestionStartTime(new Date(srv.question_started_at).getTime());
       } else {
         setQuestionStartTime(Date.now());
       }
-    }
-  };
+    })();
+
+    return () => {
+      cancelled = true;
+      questionsLoadGenRef.current++;
+    };
+  }, [step, session?.pin, session?.id, questions.length]);
 
   const handleJoin = async () => {
     if (!nickname.trim()) { setError('닉네임을 입력해주세요.'); return; }
@@ -237,6 +291,10 @@ function StudentPageInner() {
   const handleSubmitAnswer = async (explicitAnswer?: string) => {
     if (!player || !currentQ || !session || answerResult !== null) return;
     if (submittingRef.current) return;
+
+    /** 타이머 만료 등으로 빈 문자열을 강제 제출했을 때(선택 안 함≠직접 틀림) 구분용 */
+    const wasAutoBlankSubmit = explicitAnswer !== undefined && explicitAnswer === '';
+
     submittingRef.current = true;
     try {
       const qIdxServer = session.current_question_index ?? qIndex;
@@ -288,7 +346,8 @@ function StudentPageInner() {
         setAnswerResult(null);
       } else {
         const isCorrect = data.is_correct === true;
-        setAnswerResult(isCorrect ? 'correct' : 'wrong');
+        if (wasAutoBlankSubmit && !isCorrect) setAnswerResult('timeout');
+        else setAnswerResult(isCorrect ? 'correct' : 'wrong');
       }
       if (data.player) setPlayer(data.player);
       if (typeof data.score_gained === 'number') setScoreGained(data.score_gained);
@@ -334,7 +393,7 @@ function StudentPageInner() {
                 className={cn(
                   'mx-auto max-w-xl rounded-2xl border-2 bg-white p-5 shadow-lg',
                   answerResult === 'correct' && 'border-emerald-500 ring-2 ring-emerald-200',
-                  answerResult === 'wrong' && 'border-red-400 ring-2 ring-red-100',
+                  (answerResult === 'wrong' || answerResult === 'timeout') && 'border-amber-400 ring-2 ring-amber-100',
                   !answerResult && 'border-[#D1C4E9]'
                 )}
               >
@@ -371,11 +430,22 @@ function StudentPageInner() {
                       className={cn(
                         'mb-3 rounded-xl py-2.5 text-center text-base font-black',
                         answerResult === 'correct' && 'bg-emerald-100 text-emerald-800',
-                        answerResult === 'wrong' && 'bg-red-100 text-red-800'
+                        answerResult === 'wrong' && 'bg-red-100 text-red-800',
+                        answerResult === 'timeout' && 'bg-amber-100 text-amber-950'
                       )}
                     >
                       {answerResult === 'correct' ? (
                         `정답! +${scoreGained}점`
+                      ) : answerResult === 'timeout' ? (
+                        <span>
+                          시간이 끝나 자동으로 제출됐어요. 답을 고르지 않으면 오답으로 처리돼요.{' '}
+                          <span className="text-amber-900/90">
+                            정답:{' '}
+                            <MathText as="span" className="inline font-black">
+                              {currentQ.answer}
+                            </MathText>
+                          </span>
+                        </span>
                       ) : (
                         <span>
                           오답 — 정답:{' '}
@@ -408,6 +478,7 @@ function StudentPageInner() {
                           'rounded-xl border-2 py-3.5 px-4 text-left text-sm font-semibold transition-colors',
                           answerResult !== null && opt === currentQ.answer && 'border-emerald-500 bg-emerald-50 text-emerald-900',
                           answerResult !== null &&
+                            selectedAnswer !== null &&
                             opt === selectedAnswer &&
                             opt !== currentQ.answer &&
                             'border-red-400 bg-red-50 text-red-900',
