@@ -458,13 +458,14 @@ function TeacherPageInner() {
               </div>
 
               <div className="flex flex-col gap-4">
-                <div className="relative w-full min-h-[min(52vh,520px)] overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)]">
+                {/* 학생 화면과 같이 flex 열 + min-height로 자식 h-full/flex-1이 높이를 받게 함 (lg:min-h-0 임베드만으로는 높이 0 붕괴 방지) */}
+                <div className="relative flex w-full min-h-[min(52vh,520px)] flex-col overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)]">
                   <ClimbRaceTrack
                     mapId={session.map_type}
                     players={players}
                     embedded
                     timerSeconds={teacherTimeLeft ?? undefined}
-                    className="h-full min-h-0 w-full rounded-2xl border-0 shadow-none"
+                    className="min-h-0 flex-1 w-full rounded-2xl border-0 shadow-none"
                   />
                 </div>
                 <div className="space-y-2 rounded-2xl border border-white/20 bg-white/5 p-4">
