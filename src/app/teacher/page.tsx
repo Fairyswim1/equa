@@ -9,6 +9,7 @@ import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
 import { CharacterSprite } from '@/components/characters/CharacterSprite';
 import { Player, GameSession, MapId, CharacterId } from '@/types/game';
 import { QUESTION_TIME_LIMIT_SEC } from '@/lib/game/sessionAdvance';
+import { coerceQuestionStartedMs } from '@/lib/game/questionRoundClock';
 import { getRankEmoji, cn } from '@/lib/utils';
 
 function TeacherPageInner() {
@@ -28,6 +29,8 @@ function TeacherPageInner() {
   const [answeredCount, setAnsweredCount] = useState(0);
   const [clock, setClock] = useState(0);
   const teacherExpiryPosting = useRef(false);
+  /** 문항이 바뀔 때 라운드 앵커(서버 started_at 가 stale 일 때 카운트다운 폭주 방지) */
+  const teacherRoundLocalMsRef = useRef<number>(Date.now());
 
   const fetchSession = useCallback(async (pin: string) => {
     const res = await fetch(`/api/game/${pin}`);
@@ -81,17 +84,20 @@ function TeacherPageInner() {
     return () => clearInterval(id);
   }, [step, session?.id]);
 
+  useEffect(() => {
+    if (step !== 'playing' || !session) return;
+    teacherRoundLocalMsRef.current = Date.now();
+  }, [session?.id, session?.current_question_index, step]);
+
   const teacherTimeLeft = useMemo(() => {
-    if (!session || step !== 'playing' || !session.question_started_at) return null;
+    if (!session || step !== 'playing') return null;
     void clock;
+    const startMs = coerceQuestionStartedMs(session.question_started_at, teacherRoundLocalMsRef.current);
     return Math.max(
       0,
-      Math.ceil(
-        QUESTION_TIME_LIMIT_SEC -
-          (Date.now() - new Date(session.question_started_at).getTime()) / 1000
-      )
+      Math.ceil(QUESTION_TIME_LIMIT_SEC - (Date.now() - startMs) / 1000)
     );
-  }, [session, step, session?.question_started_at, clock]);
+  }, [session, step, session?.question_started_at, session?.current_question_index, clock]);
 
   useEffect(() => {
     if (!session || step !== 'playing') return;

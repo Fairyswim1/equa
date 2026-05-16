@@ -9,6 +9,7 @@ import { ClimbRaceTrack } from '@/components/game/ClimbRaceTrack';
 import { MathText } from '@/components/MathText';
 import { GameSession, Player, Question, CharacterId } from '@/types/game';
 import { QUESTION_TIME_LIMIT_SEC } from '@/lib/game/sessionAdvance';
+import { coerceQuestionStartedMs } from '@/lib/game/questionRoundClock';
 import { getRankEmoji, cn } from '@/lib/utils';
 
 const CHARACTERS: CharacterId[] = ['fox', 'cat', 'rabbit', 'bear', 'penguin', 'dog'];
@@ -49,6 +50,14 @@ function StudentPageInner() {
     myAnswer: string;
     officialAnswer: string;
     scorePreview: number;
+  } | null>(null);
+  /** 마지막 제출자(session_advanced)도 오답/정답을 볼 수 있게 카드 위 고정 토스트 */
+  const [answerToast, setAnswerToast] = useState<{
+    variant: 'correct' | 'wrong' | 'timeout';
+    official: string;
+    my: string;
+    scoreGained: number;
+    advanced: boolean;
   } | null>(null);
   const submittingRef = useRef(false);
   /** 같은 문항+시작시각 재적용 방지, question_started_at만 바뀌면 다시 적용 */
@@ -143,6 +152,12 @@ function StudentPageInner() {
     };
   }, [step, session?.pin]);
 
+  useEffect(() => {
+    if (!answerToast) return;
+    const id = window.setTimeout(() => setAnswerToast(null), 4500);
+    return () => window.clearTimeout(id);
+  }, [answerToast]);
+
   // 서버와 동일한 문항 인덱스로 문제·입력 초기화
   useEffect(() => {
     if (step !== 'playing' || !session || questions.length === 0) return;
@@ -155,6 +170,7 @@ function StudentPageInner() {
     if (lastAppliedSessionSyncKeyRef.current === syncKey && currentQ != null) return;
 
     lastAppliedSessionSyncKeyRef.current = syncKey;
+    setError('');
     setQIndex(idxSafe);
     setCurrentQ(questions[idxSafe]);
     setSelectedAnswer(null);
@@ -162,11 +178,8 @@ function StudentPageInner() {
     setAnswerResult(null);
     setFeedbackDetail(null);
     setScoreGained(0);
-    if (session.question_started_at) {
-      setQuestionStartTime(new Date(session.question_started_at).getTime());
-    } else {
-      setQuestionStartTime(Date.now());
-    }
+    setAnswerToast(null);
+    setQuestionStartTime(coerceQuestionStartedMs(session.question_started_at, Date.now()));
   }, [
     step,
     session?.id,
@@ -184,9 +197,7 @@ function StudentPageInner() {
     if (step !== 'playing' || answerResult !== null || !session) return;
 
     const tick = () => {
-      const start = session.question_started_at
-        ? new Date(session.question_started_at).getTime()
-        : questionStartTime;
+      const start = coerceQuestionStartedMs(session.question_started_at, questionStartTime);
       const left = Math.ceil(QUESTION_TIME_LIMIT_SEC - (Date.now() - start) / 1000);
       setTimeLeft(Math.max(0, left));
       // 마감 제출은 선택 보기(short 입력값)까지 반영해서 정답이 덮여씌워지지 않도록 인자 없이 처리(fromTimer 참조)
@@ -236,11 +247,7 @@ function StudentPageInner() {
       setShortAnswer('');
       setAnswerResult(null);
       setScoreGained(0);
-      if (srv.question_started_at) {
-        setQuestionStartTime(new Date(srv.question_started_at).getTime());
-      } else {
-        setQuestionStartTime(Date.now());
-      }
+      setQuestionStartTime(coerceQuestionStartedMs(srv.question_started_at, Date.now()));
     })();
 
     return () => {
@@ -301,11 +308,10 @@ function StudentPageInner() {
     if (submittingRef.current) return;
 
     submittingRef.current = true;
+    setError('');
     try {
       const qIdxServer = session.current_question_index ?? qIndex;
-      const startMs = session.question_started_at
-        ? new Date(session.question_started_at).getTime()
-        : questionStartTime;
+      const startMs = coerceQuestionStartedMs(session.question_started_at, questionStartTime);
       const timeTaken = Math.min(
         QUESTION_TIME_LIMIT_SEC,
         Math.max(0, (Date.now() - startMs) / 1000)
@@ -338,12 +344,38 @@ function StudentPageInner() {
       if (res.status === 409) {
         const sr = await fetch(`/api/game/${session.pin}`);
         if (sr.ok) setSession(await sr.json());
+        setError(
+          typeof data.message === 'string' && data.message
+            ? (data.message as string)
+            : '이미 다음 문항으로 넘어갔어요. 화면이 곧 맞춰집니다.'
+        );
         return;
       }
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const msg =
+          typeof data.error === 'string' && data.error.trim()
+            ? (data.error as string)
+            : `제출에 실패했어요 (${res.status})`;
+        setError(msg);
+        return;
+      }
+
+      setError('');
 
       const advanced = data.session_advanced === true;
+      const isCorrect = data.is_correct === true;
+      const official =
+        typeof data.official_answer === 'string' && data.official_answer.trim() !== ''
+          ? (data.official_answer as string)
+          : currentQ.answer;
+      const mine =
+        typeof data.my_answer === 'string'
+          ? (data.my_answer as string).trim()
+          : finalAnswer.trim();
+      const scorePreview = typeof data.score_gained === 'number' ? (data.score_gained as number) : 0;
+      const showTimeout = timerForcedEmptySubmit && !isCorrect;
+
       if (advanced) {
         if (data.session && typeof data.session === 'object') {
           setSession(data.session as GameSession);
@@ -351,27 +383,28 @@ function StudentPageInner() {
           const sr = await fetch(`/api/game/${session.pin}`);
           if (sr.ok) setSession((await sr.json()) as GameSession);
         }
+        void fetchPlayers(session.id, session.pin);
+        /** 다음 문항 UI가 바로 덮어도 토스트로 직전 문항 결과 표시 */
         setAnswerResult(null);
         setFeedbackDetail(null);
-        void fetchPlayers(session.id, session.pin);
       } else {
-        const isCorrect = data.is_correct === true;
-        if (timerForcedEmptySubmit && !isCorrect) setAnswerResult('timeout');
+        if (showTimeout) setAnswerResult('timeout');
         else setAnswerResult(isCorrect ? 'correct' : 'wrong');
-        const official =
-          typeof data.official_answer === 'string' && data.official_answer.trim() !== ''
-            ? (data.official_answer as string)
-            : currentQ.answer;
         setFeedbackDetail({
-          myAnswer:
-            typeof data.my_answer === 'string'
-              ? (data.my_answer as string).trim()
-              : finalAnswer.trim(),
+          myAnswer: mine,
           officialAnswer: official,
-          scorePreview:
-            typeof data.score_gained === 'number' ? (data.score_gained as number) : 0,
+          scorePreview,
         });
       }
+
+      setAnswerToast({
+        variant: showTimeout ? 'timeout' : isCorrect ? 'correct' : 'wrong',
+        official,
+        my: mine,
+        scoreGained: scorePreview,
+        advanced,
+      });
+
       if (data.player) setPlayer(data.player);
       if (typeof data.score_gained === 'number') setScoreGained(data.score_gained);
     } finally {
@@ -394,7 +427,7 @@ function StudentPageInner() {
         <div className="flex min-h-screen flex-col lg:flex-row">
           {/* 교사 대시보드와 동일한 비율·최소 높이로 링크: slice 제거 후에도 높이가 충분해야 전체 산이 보입니다 */}
           <div className="relative order-1 flex w-full shrink-0 flex-col lg:order-2 lg:min-h-0 lg:flex-1 lg:pl-3 lg:pr-2 lg:w-[min(460px,42vw)]">
-            <div className="relative flex min-h-[min(52vh,520px)] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)] lg:min-h-0">
+            <div className="relative flex min-h-[min(52vh,520px)] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)]">
               <ClimbRaceTrack
                 mapId={session.map_type}
                 players={allPlayers.length ? allPlayers : [player]}
@@ -406,12 +439,64 @@ function StudentPageInner() {
             </div>
           </div>
           <div className="relative z-30 order-2 flex min-h-0 flex-1 flex-col lg:order-1">
+            {answerToast && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className={cn(
+                  'z-40 shrink-0 border-b-2 px-4 py-3 text-center text-sm shadow-lg',
+                  answerToast.variant === 'correct' &&
+                    'border-emerald-500 bg-emerald-100 font-bold text-emerald-950',
+                  answerToast.variant === 'wrong' &&
+                    'border-red-400 bg-red-50 font-bold text-red-950',
+                  answerToast.variant === 'timeout' &&
+                    'border-amber-500 bg-amber-100 font-bold text-amber-950'
+                )}
+              >
+                <span className="mr-2">
+                  {answerToast.variant === 'correct'
+                    ? '정답!'
+                    : answerToast.variant === 'timeout'
+                      ? '시간 초과 — 오답'
+                      : '오답'}
+                </span>
+                {(answerToast.variant === 'wrong' || answerToast.variant === 'timeout') && (
+                  <>
+                    <span className="block text-emerald-900 md:mt-0 md:inline">
+                      모범 정답: <MathText as="span">{answerToast.official}</MathText>
+                    </span>
+                    <p className="mt-1 text-xs font-semibold text-slate-800 md:inline md:before:mx-2 md:before:content-['·'] md:before:text-slate-500">
+                      제출:&nbsp;
+                      <MathText as="span" className="font-black text-violet-950">
+                        {answerToast.variant === 'timeout' && !answerToast.my.trim()
+                          ? '(미제출)'
+                          : answerToast.my || '—'}
+                      </MathText>
+                    </p>
+                  </>
+                )}
+                {answerToast.variant === 'correct' && answerToast.scoreGained > 0 && (
+                  <span className="ml-2 text-emerald-800">예정 보너스 +{answerToast.scoreGained}</span>
+                )}
+                {answerToast.advanced && (
+                  <p className="mt-2 text-[11px] font-semibold text-slate-800">
+                    모두 제출되어 다음 문제로 진행했어요. 직전 문항 결과입니다.
+                  </p>
+                )}
+              </motion.div>
+            )}
             <div className="flex items-center justify-center gap-2 bg-[#6B4BA8] py-3 text-center text-sm font-black text-white shadow-md">
               <span>문제 {(session.current_question_index ?? qIndex) + 1} / {session.question_count}</span>
               <span className="text-white/50">|</span>
               <span>{player.nickname}</span>
               <span className="text-amber-200">{player.score}점</span>
             </div>
+            {error ? (
+              <div className="shrink-0 border-b border-red-700/60 bg-red-900/95 px-3 py-2 text-center text-xs font-semibold text-red-100">
+                {error}
+              </div>
+            ) : null}
             <div className="flex-1 overflow-y-auto bg-[#EDE7F6] p-3 sm:p-5">
               <motion.div
                 key={session.current_question_index ?? qIndex}

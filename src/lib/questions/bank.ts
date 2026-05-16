@@ -1,5 +1,5 @@
 import { Question } from '@/types/game';
-import { texifyQuestionFields } from '@/lib/math/texify';
+import { texifyQuestionRecord } from '@/lib/math/texify';
 
 export const QUESTION_BANK: Question[] = [
   // ========== 복소수 개념 ==========
@@ -869,20 +869,12 @@ export const QUESTION_BANK: Question[] = [
 export function getQuestions(count: number): Question[] {
   const shuffled = [...QUESTION_BANK].sort(() => Math.random() - 0.5);
   const picked = shuffled.slice(0, Math.min(count, QUESTION_BANK.length));
-  return picked.map((q) => {
-    const { text, options } = texifyQuestionFields(q.text, q.options);
-    const explanation = q.explanation ? texifyQuestionFields(q.explanation).text : undefined;
-    return { ...q, text, options, explanation, latex: true };
-  });
+  return picked.map((q) => ({ ...texifyQuestionRecord(q), latex: true }));
 }
 
 export function getQuestionsByCategory(category: string, count: number): Question[] {
   const filtered = QUESTION_BANK.filter(q => q.category === category);
   const shuffled = filtered.sort(() => Math.random() - 0.5);
   const picked = shuffled.slice(0, count);
-  return picked.map((q) => {
-    const { text, options } = texifyQuestionFields(q.text, q.options);
-    const explanation = q.explanation ? texifyQuestionFields(q.explanation).text : undefined;
-    return { ...q, text, options, explanation, latex: true };
-  });
+  return picked.map((q) => ({ ...texifyQuestionRecord(q), latex: true }));
 }
