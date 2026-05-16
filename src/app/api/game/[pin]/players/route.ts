@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseForApi } from '@/lib/supabase/api';
 import { CharacterId } from '@/types/game';
 
+export const runtime = 'nodejs';
+
 // GET /api/game/[pin]/players - 플레이어 목록 조회
 export async function GET(
   _request: NextRequest,

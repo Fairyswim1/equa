@@ -49,13 +49,24 @@ export function getSupabaseEnvDebug(): SupabaseEnvDebug {
 
 /**
  * Route Handler / 서버 API 전용. 쿠키를 쓰지 않아 Vercel 등에서 안정적으로 동작합니다.
+ *
+ * 설정돼 있으면 `SUPABASE_SERVICE_ROLE_KEY`를 우선 사용합니다(RLS 무시 · 서버 전용 비밀이므로 브라우저에 두지 마세요).
+ * anon만 쓸 때 게임 업데이트가 RLS에 막히면 Vercel에 서비스 롤 키를 넣어 해결할 수 있습니다.
  */
 export function createSupabaseForApi(): SupabaseClient {
-  const cfg = getSupabaseServerConfig();
-  if (!cfg) {
+  const url =
+    process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const anonKey =
+    process.env.SUPABASE_ANON_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const key = serviceKey || anonKey;
+  if (!url || !key) {
     throw new Error(
-      'Supabase URL/anon 키가 없습니다. Vercel에 SUPABASE_URL+SUPABASE_ANON_KEY 또는 NEXT_PUBLIC_SUPABASE_URL+NEXT_PUBLIC_SUPABASE_ANON_KEY 를 Production으로 넣고 Redeploy 하세요.'
+      'Supabase URL/키가 없습니다. Vercel에 SUPABASE_URL+SUPABASE_ANON_KEY(또는 NEXT_PUBLIC_* 쌍), 필요 시 SUPABASE_SERVICE_ROLE_KEY 서버 전용으로 넣고 Redeploy 하세요.'
     );
   }
-  return createClient(cfg.url, cfg.key);
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }

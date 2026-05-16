@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseForApi } from '@/lib/supabase/api';
 import { advanceToNextQuestion } from '@/lib/game/sessionAdvance';
 
+export const runtime = 'nodejs';
+
 /** 교사가 미응답자를 넘기고 다음 문항으로 진행 (미제출자는 자동 오답 처리) */
 export async function POST(
   _request: NextRequest,
@@ -17,7 +19,10 @@ export async function POST(
   }
 
   if (session.status !== 'playing') {
-    return NextResponse.json({ error: '진행 중인 게임이 아닙니다.' }, { status: 400 });
+    return NextResponse.json(
+      { error: '진행 중인 게임이 아닙니다.', current_status: session.status },
+      { status: 400 }
+    );
   }
 
   const result = await advanceToNextQuestion(supabase, session, { finalizeCurrent: true });

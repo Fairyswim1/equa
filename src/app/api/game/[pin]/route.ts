@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseForApi } from '@/lib/supabase/api';
 
+export const runtime = 'nodejs';
+
 // GET /api/game/[pin] - 게임 세션 정보 조회
 export async function GET(
   _request: NextRequest,

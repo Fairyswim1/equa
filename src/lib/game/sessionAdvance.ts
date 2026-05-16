@@ -10,6 +10,8 @@ function isMissingSyncColumnsError(message: string): boolean {
     (m.includes('column') && (m.includes('does not exist') || m.includes('unknown'))) ||
     m.includes('42703') ||
     m.includes('undefined_column') ||
+    m.includes('schema cache') ||
+    m.includes('pgrst204') ||
     (m.includes('current_question_index') && m.includes('does not exist')) ||
     (m.includes('question_started_at') && m.includes('does not exist'))
   );
@@ -173,6 +175,14 @@ export async function advanceToNextQuestion(
     }
 
     if (error || !updated) {
+      const { data: row } = await supabase
+        .from('game_sessions')
+        .select('*')
+        .eq('id', session.id)
+        .maybeSingle();
+      if (row && (row as { status: string }).status === 'finished') {
+        return { advanced: true, session: row as SessionRow, finished: true };
+      }
       return {
         advanced: false,
         session: null,
@@ -248,6 +258,22 @@ export async function advanceToNextQuestion(
   }
 
   if (!updated) {
+    const { data: row } = await supabase
+      .from('game_sessions')
+      .select('*')
+      .eq('id', session.id)
+      .maybeSingle();
+
+    if (row) {
+      const r = row as SessionRow & { status: string };
+      if (r.status === 'finished') {
+        return { advanced: true, session: r as SessionRow, finished: true };
+      }
+      if (r.status === 'playing' && sessionQuestionIndex(r) >= nextIdx) {
+        return { advanced: true, session: r as SessionRow, finished: false };
+      }
+    }
+
     const migrationHint =
       lastErr && isMissingSyncColumnsError(lastErr)
         ? 'Supabase에 supabase/migrations/002_session_question_sync.sql 을 적용했는지 확인하세요.'

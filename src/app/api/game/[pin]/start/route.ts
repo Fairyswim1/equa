@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseForApi } from '@/lib/supabase/api';
 
+export const runtime = 'nodejs';
+
 // POST /api/game/[pin]/start - 게임 시작
 export async function POST(
   _request: NextRequest,

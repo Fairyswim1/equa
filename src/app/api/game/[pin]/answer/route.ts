@@ -7,6 +7,8 @@ import {
 } from '@/lib/game/sessionAdvance';
 import type { Question } from '@/types/game';
 
+export const runtime = 'nodejs';
+
 // POST /api/game/[pin]/answer - 답 제출 (세션 문항 인덱스와 일치할 때만 허용)
 export async function POST(
   request: NextRequest,
