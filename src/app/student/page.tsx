@@ -170,7 +170,7 @@ function StudentPageInner() {
     currentQ,
   ]);
 
-  const handleSubmitRef = useRef<((explicitAnswer?: string) => Promise<void>) | null>(null);
+  const handleSubmitRef = useRef<((explicitAnswer?: string, fromTimer?: boolean) => Promise<void>) | null>(null);
 
   // 40초 제한 — 서버 question_started_at 기준 (없으면 questionStartTime 폴백)
   useEffect(() => {
@@ -182,8 +182,9 @@ function StudentPageInner() {
         : questionStartTime;
       const left = Math.ceil(QUESTION_TIME_LIMIT_SEC - (Date.now() - start) / 1000);
       setTimeLeft(Math.max(0, left));
+      // 마감 제출은 선택 보기(short 입력값)까지 반영해서 정답이 덮여씌워지지 않도록 인자 없이 처리(fromTimer 참조)
       if (left <= 0 && !submittingRef.current) {
-        void handleSubmitRef.current?.('');
+        void handleSubmitRef.current?.(undefined, true);
       }
     };
 
@@ -288,12 +289,9 @@ function StudentPageInner() {
     }
   };
 
-  const handleSubmitAnswer = async (explicitAnswer?: string) => {
+  const handleSubmitAnswer = async (explicitAnswer?: string, fromTimer = false) => {
     if (!player || !currentQ || !session || answerResult !== null) return;
     if (submittingRef.current) return;
-
-    /** 타이머 만료 등으로 빈 문자열을 강제 제출했을 때(선택 안 함≠직접 틀림) 구분용 */
-    const wasAutoBlankSubmit = explicitAnswer !== undefined && explicitAnswer === '';
 
     submittingRef.current = true;
     try {
@@ -311,6 +309,9 @@ function StudentPageInner() {
           : currentQ.type === 'short'
             ? shortAnswer
             : selectedAnswer ?? '';
+
+      /** 타이머가 빈 채점일 때만 "시간 초과" 카피(선택/입력값이 반영된 마감 제출은 여기 포함 안 함) */
+      const timerForcedEmptySubmit = fromTimer && finalAnswer.trim() === '';
 
       const res = await fetch(`/api/game/${session.pin}/answer`, {
         method: 'POST',
@@ -346,7 +347,7 @@ function StudentPageInner() {
         setAnswerResult(null);
       } else {
         const isCorrect = data.is_correct === true;
-        if (wasAutoBlankSubmit && !isCorrect) setAnswerResult('timeout');
+        if (timerForcedEmptySubmit && !isCorrect) setAnswerResult('timeout');
         else setAnswerResult(isCorrect ? 'correct' : 'wrong');
       }
       if (data.player) setPlayer(data.player);

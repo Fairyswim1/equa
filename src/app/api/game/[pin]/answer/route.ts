@@ -78,19 +78,24 @@ export async function POST(
     .select('question_data')
     .eq('session_id', session.id)
     .eq('question_index', body.question_index)
-    .single();
+    .maybeSingle();
 
   let qType: Question['type'] = 'multiple';
+  /** 반드시 DB 기준으로 채점 (클라이언트 currentQ·correct_answer 불일치 시에도 오판 방지) */
+  let expectedAnswer = body.correct_answer;
   if (qRow?.question_data) {
     try {
       const q = JSON.parse(qRow.question_data as string) as Question;
       qType = q.type;
+      if (typeof q.answer === 'string' && q.answer.trim() !== '') {
+        expectedAnswer = q.answer;
+      }
     } catch {
       /* ignore */
     }
   }
 
-  const is_correct = answersEqual(body.answer, body.correct_answer, qType);
+  const is_correct = answersEqual(body.answer, expectedAnswer, qType);
 
   await supabase.from('player_answers').insert({
     player_id: body.player_id,
