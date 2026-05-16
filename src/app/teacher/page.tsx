@@ -452,13 +452,13 @@ function TeacherPageInner() {
               </div>
 
               <div className="flex flex-col gap-4">
-                <div className="w-full min-h-[min(52vh,520px)] overflow-hidden rounded-2xl lg:min-h-[min(58vh,600px)]">
+                <div className="relative w-full min-h-[min(52vh,520px)] overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)]">
                   <ClimbRaceTrack
                     mapId={session.map_type}
                     players={players}
                     embedded
                     timerSeconds={teacherTimeLeft ?? undefined}
-                    className="h-full w-full rounded-2xl"
+                    className="h-full min-h-0 w-full rounded-2xl border-0 shadow-none"
                   />
                 </div>
                 <div className="space-y-2 rounded-2xl border border-white/20 bg-white/5 p-4">

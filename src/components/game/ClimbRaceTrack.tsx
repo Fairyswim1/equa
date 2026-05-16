@@ -302,7 +302,8 @@ function ClimbRaceTrackInner({
         compact
           ? 'min-h-[240px]'
           : embedded
-            ? 'min-h-[min(52vh,520px)] h-[min(52vh,520px)] w-full max-h-[88vh] lg:min-h-[min(58vh,600px)] lg:h-[min(58vh,600px)]'
+            ? /* 부모 카드 높이 꽉 채움 — 교사/학생 동일 래퍼에서 높이 제어 */
+              'h-full min-h-[min(48vh,400px)] w-full lg:min-h-0'
             : 'min-h-[min(100vh,540px)] lg:min-h-screen lg:h-screen',
         className
       )}
@@ -332,10 +333,28 @@ function ClimbRaceTrackInner({
       <svg
         className="absolute inset-0 h-full w-full"
         viewBox="0 0 100 100"
-        preserveAspectRatio="xMidYMid slice"
+        preserveAspectRatio="xMidYMid meet"
         aria-hidden
       >
         <defs>
+          <radialGradient id={`atm-haze-${mapId}`} cx="50%" cy="112%" r="72%">
+            <stop offset="0%" stopColor={theme.sky2} stopOpacity="0.22" />
+            <stop offset="55%" stopColor={theme.sky0} stopOpacity="0.52" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0.78" />
+          </radialGradient>
+          <radialGradient id={`vignette-${mapId}`} cx="50%" cy="45%" r="58%">
+            <stop offset="40%" stopColor="transparent" stopOpacity="0" />
+            <stop offset="92%" stopColor="#020617" stopOpacity="0.38" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0.62" />
+          </radialGradient>
+          <linearGradient id={`ridge-far-${mapId}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={theme.sky0} stopOpacity="0.92" />
+            <stop offset="100%" stopColor={theme.slope2} stopOpacity="0.55" />
+          </linearGradient>
+          <linearGradient id={`ridge-mid-${mapId}`} x1="0%" y1="0%" x2="100%" y2="80%">
+            <stop offset="0%" stopColor={theme.slope2} stopOpacity="0.72" />
+            <stop offset="100%" stopColor={theme.slope1} stopOpacity="0.45" />
+          </linearGradient>
           <radialGradient id={`sun-${mapId}`} cx="50%" cy="15%" r="60%">
             <stop offset="0%" stopColor={theme.sky2} stopOpacity="0.75" />
             <stop offset="45%" stopColor={theme.sky1} stopOpacity="0.32" />
@@ -373,6 +392,21 @@ function ClimbRaceTrackInner({
 
         <rect width="100" height="100" fill={`url(#sky-${mapId})`} />
         <rect width="100" height="100" fill={`url(#sun-${mapId})`} />
+
+        {/* 원경 릿지 + 저고도 안개 */}
+        <path
+          pointerEvents="none"
+          d="M-4 22 C12 18 30 28 50 24 C68 20 86 30 104 28 L104 86 L-4 92 Z"
+          fill={`url(#ridge-far-${mapId})`}
+          opacity={mapId === 'space' ? 0.22 : 0.4}
+        />
+        <path
+          pointerEvents="none"
+          d="M-4 30 C24 36 48 32 72 38 C86 40 104 44 104 44 L104 92 L-4 98 Z"
+          fill={`url(#ridge-mid-${mapId})`}
+          opacity={mapId === 'space' ? 0.12 : 0.2}
+        />
+        <rect width="100" height="100" fill={`url(#atm-haze-${mapId})`} opacity="0.5" pointerEvents="none" />
 
         <FloatingParticles mapId={mapId} />
 
@@ -474,6 +508,18 @@ function ClimbRaceTrackInner({
           opacity="0.18"
         />
 
+        <path
+          d={pathD}
+          fill="none"
+          stroke="rgba(255,255,255,0.28)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray="2 2.4"
+          opacity="0.75"
+          style={{ pointerEvents: 'none' }}
+        />
+
         <g filter={`url(#trailShadow-${mapId})`} opacity="0.95">
           {checkpointT.map((t, idx) => {
             const pt = getPointOnPolyline(CLIMB_TRACK_POINTS, t);
@@ -514,6 +560,8 @@ function ClimbRaceTrackInner({
           </motion.g>
         </g>
 
+        <rect width="100" height="100" fill={`url(#vignette-${mapId})`} pointerEvents="none" />
+
         <rect x="1" y="1" width="98" height="98" rx="4" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="0.35" />
       </svg>
 
@@ -540,7 +588,7 @@ function ClimbRaceTrackInner({
         </motion.div>
       )}
 
-      <div className="pointer-events-none absolute inset-0 z-30">
+      <div className="pointer-events-none absolute inset-0 z-30 overflow-visible">
         {stable.map((p, idx) => {
           const t = Math.min(1, Math.max(0, (p.position ?? 0) / 100));
           const base = getPointOnPolyline(CLIMB_TRACK_POINTS, t);
@@ -548,12 +596,12 @@ function ClimbRaceTrackInner({
           const px = Math.min(94, Math.max(6, base.x + lane * 3.5));
           const py = Math.min(94, Math.max(6, base.y + Math.abs(lane) * 1.2));
           const isMe = emphasizePlayerId && p.id === emphasizePlayerId;
-          const size = compact ? 38 : isMe ? 58 : 44;
+          const size = compact ? 40 : isMe ? 68 : 52;
 
           return (
             <motion.div
               key={p.id}
-              className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+              className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center overflow-visible"
               initial={false}
               animate={{ left: `${px}%`, top: `${py}%` }}
               transition={{ type: 'spring', stiffness: 130, damping: 17 }}
@@ -574,10 +622,18 @@ function ClimbRaceTrackInner({
 
               <div
                 className={cn(
-                  'relative drop-shadow-[0_8px_10px_rgba(0,0,0,0.5)]',
-                  isMe && 'scale-110'
+                  'relative pb-3 drop-shadow-[0_14px_18px_rgba(0,0,0,0.55)]',
+                  isMe && 'scale-[1.06]'
                 )}
               >
+                <span
+                  className={cn(
+                    'pointer-events-none absolute left-1/2 top-[88%] h-5 w-[min(150%,100px)] -translate-x-1/2 rounded-[100%]',
+                    mapId === 'space' ? 'bg-violet-950/65' : 'bg-black/[0.45]'
+                  )}
+                  style={{ filter: 'blur(6px)' }}
+                  aria-hidden
+                />
                 {isMe && (
                   <div
                     className="absolute -inset-2 -z-10 rounded-full blur-md"

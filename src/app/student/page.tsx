@@ -392,14 +392,18 @@ function StudentPageInner() {
       {/* Nearpod식: 와이드에서 퀴즈 | 맵 경주 */}
       {step === 'playing' && currentQ && player && session ? (
         <div className="flex min-h-screen flex-col lg:flex-row">
-          <div className="relative order-1 h-[min(38vh,280px)] w-full shrink-0 lg:order-2 lg:h-screen lg:min-h-0 lg:w-[min(440px,40vw)]">
-            <ClimbRaceTrack
-              mapId={session.map_type}
-              players={allPlayers.length ? allPlayers : [player]}
-              emphasizePlayerId={player.id}
-              timerSeconds={timeLeft}
-              className="h-full rounded-none border-0 shadow-none lg:rounded-l-none"
-            />
+          {/* 교사 대시보드와 동일한 비율·최소 높이로 링크: slice 제거 후에도 높이가 충분해야 전체 산이 보입니다 */}
+          <div className="relative order-1 flex w-full shrink-0 flex-col lg:order-2 lg:min-h-0 lg:flex-1 lg:pl-3 lg:pr-2 lg:w-[min(460px,42vw)]">
+            <div className="relative flex min-h-[min(52vh,520px)] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)] lg:min-h-[min(58vh,600px)] lg:min-h-0">
+              <ClimbRaceTrack
+                mapId={session.map_type}
+                players={allPlayers.length ? allPlayers : [player]}
+                emphasizePlayerId={player.id}
+                timerSeconds={timeLeft}
+                embedded
+                className="h-full min-h-0 w-full rounded-2xl border-0 bg-slate-950 shadow-none"
+              />
+            </div>
           </div>
           <div className="relative z-30 order-2 flex min-h-0 flex-1 flex-col lg:order-1">
             <div className="flex items-center justify-center gap-2 bg-[#6B4BA8] py-3 text-center text-sm font-black text-white shadow-md">

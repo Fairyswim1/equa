@@ -584,22 +584,22 @@ export function CharacterSprite({
   return (
     <div
       className={cn(
-        'relative inline-block',
+        'relative inline-block overflow-visible',
         variant === 'mascot' && [
-          'rounded-full',
-          'bg-gradient-to-b from-white/50 to-white/10',
-          'p-0.5',
-          'ring-[2.5px] ring-[#3d2917]',
-          'shadow-[0_3px_0_#2d1f12]',
+          'rounded-[999px]',
+          'border-[2px] border-white/[0.55]',
+          'bg-gradient-to-b from-white/[0.55] via-white/[0.12] to-white/[0.05]',
+          'p-[3px]',
+          'outline outline-[2.5px] outline-black/25',
+          'shadow-[inset_0_2px_5px_rgba(255,255,255,0.55),inset_0_-3px_6px_rgba(0,0,0,0.12),0_14px_22px_rgba(0,0,0,0.48),0_0_18px_rgba(255,255,255,0.12)]',
         ],
         className
       )}
       style={{
         transform: `scale(${scale})`,
-        transformOrigin: 'top left',
+        transformOrigin: variant === 'mascot' ? 'top center' : 'top left',
         width: size,
         height: size,
-        overflow: 'visible',
       }}
     >
       <style>{KEYFRAMES}</style>
