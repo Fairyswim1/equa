@@ -134,13 +134,14 @@ export async function POST(
     .select()
     .single();
 
-  const { advanced } = await maybeAutoAdvanceAfterAnswer(supabase, session.id);
+  const advanceResult = await maybeAutoAdvanceAfterAnswer(supabase, session.id);
 
   return NextResponse.json({
     is_correct,
     player: updatedPlayer,
     score_gained: scoreAdd,
-    session_advanced: advanced,
+    session_advanced: advanceResult.advanced,
+    ...(advanceResult.session ? { session: advanceResult.session } : {}),
   });
 }
 

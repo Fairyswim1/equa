@@ -277,8 +277,19 @@ function StudentPageInner() {
 
       if (!res.ok) return;
 
-      const isCorrect = data.is_correct === true;
-      setAnswerResult(isCorrect ? 'correct' : 'wrong');
+      const advanced = data.session_advanced === true;
+      if (advanced) {
+        if (data.session && typeof data.session === 'object') {
+          setSession(data.session as GameSession);
+        } else {
+          const sr = await fetch(`/api/game/${session.pin}`);
+          if (sr.ok) setSession((await sr.json()) as GameSession);
+        }
+        setAnswerResult(null);
+      } else {
+        const isCorrect = data.is_correct === true;
+        setAnswerResult(isCorrect ? 'correct' : 'wrong');
+      }
       if (data.player) setPlayer(data.player);
       if (typeof data.score_gained === 'number') setScoreGained(data.score_gained);
     } finally {

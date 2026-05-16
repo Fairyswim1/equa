@@ -268,21 +268,22 @@ export async function advanceToNextQuestion(
 export async function maybeAutoAdvanceAfterAnswer(
   supabase: SupabaseClient,
   sessionId: string
-): Promise<{ advanced: boolean }> {
+): Promise<{ advanced: boolean; session: SessionRow | null }> {
   const { data: session } = await supabase
     .from('game_sessions')
     .select('*')
     .eq('id', sessionId)
     .single();
 
-  if (!session || session.status !== 'playing') return { advanced: false };
+  if (!session || session.status !== 'playing') return { advanced: false, session: null };
 
   const s = session as SessionRow;
   const qIdxSafe = sessionQuestionIndex(s);
 
-  const { count: playerCount } = await supabase
+  // count + head 조합에서 count가 안 오면 n=0 으로 잘못 막히는 경우가 있어 id 행으로 인원 확인
+  const { data: playerRows } = await supabase
     .from('players')
-    .select('*', { count: 'exact', head: true })
+    .select('id')
     .eq('session_id', s.id);
 
   const { data: answers } = await supabase
@@ -292,9 +293,9 @@ export async function maybeAutoAdvanceAfterAnswer(
     .eq('question_index', qIdxSafe);
 
   const distinct = new Set((answers ?? []).map((r: { player_id: string }) => r.player_id));
-  const n = playerCount ?? 0;
-  if (n === 0 || distinct.size < n) return { advanced: false };
+  const n = playerRows?.length ?? 0;
+  if (n === 0 || distinct.size < n) return { advanced: false, session: null };
 
   const r = await advanceToNextQuestion(supabase, s, { finalizeCurrent: false });
-  return { advanced: r.advanced };
+  return { advanced: r.advanced, session: r.session ?? null };
 }

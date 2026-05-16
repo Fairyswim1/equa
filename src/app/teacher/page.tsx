@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -27,6 +27,7 @@ function TeacherPageInner() {
   const [nextBusy, setNextBusy] = useState(false);
   const [answeredCount, setAnsweredCount] = useState(0);
   const [clock, setClock] = useState(0);
+  const teacherExpiryPosting = useRef(false);
 
   const fetchSession = useCallback(async (pin: string) => {
     const res = await fetch(`/api/game/${pin}`);
@@ -191,10 +192,11 @@ function TeacherPageInner() {
     setStep('finished');
   };
 
-  const handleTeacherNextQuestion = async () => {
-    if (!session) return;
+  const handleTeacherNextQuestion = useCallback(async (): Promise<boolean> => {
+    if (!session) return false;
     setNextBusy(true);
     try {
+      setError('');
       const res = await fetch(`/api/game/${session.pin}/next-question`, { method: 'POST' });
       const data = (await res.json()) as {
         session?: GameSession;
@@ -206,14 +208,26 @@ function TeacherPageInner() {
       if (!res.ok) {
         const parts = [data.error, data.detail, data.hint].filter(Boolean);
         setError(parts.join('\n') || '다음 문제로 넘기지 못했습니다.');
-        return;
+        return false;
       }
       if (data.session) setSession(data.session);
       if (data.finished) setStep('finished');
+      return true;
     } finally {
       setNextBusy(false);
     }
-  };
+  }, [session]);
+
+  /** 시간(40초) 만료 시 서버에서 다음 문항으로 — 학생 브라우저가 타임아웃 오답을 못 넣더라도 게임이 멈추지 않게 함 */
+  useEffect(() => {
+    if (step !== 'playing' || !session) return;
+    if (teacherTimeLeft == null || teacherTimeLeft > 0 || nextBusy) return;
+    if (teacherExpiryPosting.current) return;
+    teacherExpiryPosting.current = true;
+    void handleTeacherNextQuestion().finally(() => {
+      teacherExpiryPosting.current = false;
+    });
+  }, [teacherTimeLeft, step, session, nextBusy, handleTeacherNextQuestion]);
 
   const maps: MapId[] = ['forest', 'ocean', 'space', 'sky', 'volcano'];
 
